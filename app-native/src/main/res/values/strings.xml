@@ -1,0 +1,18 @@
+<resources>
+    <string name="app_name">Gemini</string>
+    <string name="login_title">Вход в аккаунт Google</string>
+    <string name="login_description">Войдите в свой Google-аккаунт для синхронизации всех чатов и подписки.</string>
+    <string name="new_chat">Новый чат</string>
+    <string name="type_message_hint">Спросите о чем угодно…</string>
+    <string name="send">Отправить</string>
+    <string name="record_voice">Голосовой ввод</string>
+    <string name="models_header">Выбор модели</string>
+    <string name="gems_title">Блокноты (Gems)</string>
+    <string name="scheduled_title">Запланированное</string>
+    <string name="spark_title">Задачи (Spark)</string>
+    <string name="branch_action">Создать ветвь в новом чате</string>
+    <string name="edit_action">Редактировать</string>
+    <string name="copy_action">Копировать</string>
+    <string name="canvas_title">Canvas</string>
+    <string name="logout">Выйти</string>
+</resources>

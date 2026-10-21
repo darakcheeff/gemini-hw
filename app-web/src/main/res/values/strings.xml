@@ -1,0 +1,5 @@
+<resources>
+    <string name="app_name_web">Gemini Web</string>
+    <string name="network_error">Ошибка подключения. Проверьте интернет.</string>
+    <string name="retry">Повторить</string>
+</resources>
