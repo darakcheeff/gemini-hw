@@ -7,6 +7,7 @@ import com.gemini.hw.core.audio.AudioRecorder
 import com.gemini.hw.core.auth.AuthRepository
 import com.gemini.hw.core.model.*
 import com.gemini.hw.core.network.GeminiWebClient
+import com.gemini.hw.core.repository.GemsAndSparkRepository
 import com.gemini.hw.nativeapp.GeminiApp
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -15,12 +16,17 @@ import kotlinx.coroutines.launch
 
 class MainViewModel(application: Application) : AndroidViewModel(application) {
 
-    private val authRepository: AuthRepository = (application as GeminiApp).authRepository
-    private val client: GeminiWebClient = application.geminiWebClient
+    private val app = application as GeminiApp
+    private val authRepository: AuthRepository = app.authRepository
+    private val client: GeminiWebClient = app.geminiWebClient
     private val audioRecorder: AudioRecorder = AudioRecorder(application)
-    val gemsAndSparkRepo = application.gemsAndSparkRepository
+    val gemsAndSparkRepo: GemsAndSparkRepository = app.gemsAndSparkRepository
 
-    val isLoggedIn = authRepository.isLoggedIn
+    val isLoggedIn: StateFlow<Boolean> = authRepository.isLoggedIn
+
+    val gems: StateFlow<List<Gem>> = gemsAndSparkRepo.gems
+    val sparkTasks: StateFlow<List<SparkTask>> = gemsAndSparkRepo.sparkTasks
+    val scheduledItems: StateFlow<List<ScheduledItem>> = gemsAndSparkRepo.scheduledItems
 
     private val _conversations = MutableStateFlow<List<Conversation>>(emptyList())
     val conversations: StateFlow<List<Conversation>> = _conversations.asStateFlow()
@@ -164,7 +170,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val index = list.indexOfFirst { it.id == messageId }
         if (index >= 0) {
             val edited = list[index].copy(text = newText)
-            // Truncate subsequent messages and re-generate
             val subList = list.subList(0, index + 1).toMutableList()
             subList[index] = edited
             _messages.value = subList
@@ -183,7 +188,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 val branchedConvo = res.getOrThrow()
                 _conversations.value = listOf(branchedConvo) + _conversations.value
                 _currentConversationId.value = branchedConvo.id
-                // Seed new chat with current message
                 _messages.value = listOf(message.copy(conversationId = branchedConvo.id))
             }
         }

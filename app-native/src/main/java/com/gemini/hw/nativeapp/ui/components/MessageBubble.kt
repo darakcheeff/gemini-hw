@@ -103,10 +103,11 @@ fun MessageBubble(
                     }
 
                     // Canvas button if message contains interactive document
-                    if (message.canvas != null) {
+                    val canvasDoc = message.canvas
+                    if (canvasDoc != null) {
                         Spacer(modifier = Modifier.height(8.dp))
                         Button(
-                            onClick = { onOpenCanvas(message.canvas) },
+                            onClick = { onOpenCanvas(canvasDoc) },
                             colors = ButtonDefaults.buttonColors(
                                 containerColor = MaterialTheme.colorScheme.primary
                             ),
@@ -114,7 +115,7 @@ fun MessageBubble(
                         ) {
                             Icon(Icons.Default.Edit, contentDescription = null, modifier = Modifier.size(16.dp))
                             Spacer(modifier = Modifier.width(6.dp))
-                            Text("Открыть Canvas: ${message.canvas.title}", fontSize = 13.sp)
+                            Text("Открыть Canvas: ${canvasDoc.title}", fontSize = 13.sp)
                         }
                     }
                 }

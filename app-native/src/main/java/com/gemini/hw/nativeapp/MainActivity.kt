@@ -70,9 +70,9 @@ fun MainScreen(viewModel: MainViewModel) {
     val isLoading by viewModel.isLoading.collectAsState()
     val activeCanvas by viewModel.activeCanvas.collectAsState()
 
-    val gems by viewModel.gemsAndSparkRepo.gems.collectAsState()
-    val sparkTasks by viewModel.gemsAndSparkRepo.sparkTasks.collectAsState()
-    val scheduledItems by viewModel.gemsAndSparkRepo.scheduledItems.collectAsState()
+    val gems by viewModel.gems.collectAsState()
+    val sparkTasks by viewModel.sparkTasks.collectAsState()
+    val scheduledItems by viewModel.scheduledItems.collectAsState()
 
     var showGemsDialog by remember { mutableStateOf(false) }
     var showSparkDialog by remember { mutableStateOf(false) }
