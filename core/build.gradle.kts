@@ -30,6 +30,9 @@ android {
     kotlinOptions {
         jvmTarget = "17"
     }
+    testOptions {
+        unitTests.isReturnDefaultValues = true
+    }
 }
 
 dependencies {
@@ -41,4 +44,8 @@ dependencies {
     implementation(libs.kotlinx.serialization.json)
     implementation(libs.okhttp)
     implementation(libs.okhttp.logging)
+
+    testImplementation(libs.junit)
+    testImplementation(libs.json.org)
+    testImplementation(libs.kotlinx.coroutines.test)
 }

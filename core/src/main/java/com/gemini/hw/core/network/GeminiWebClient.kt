@@ -24,8 +24,13 @@ class GeminiWebClient(
 ) {
     private val client: OkHttpClient = okHttpClient.get()
 
-    private var cachedSnlm0e: String? = null
-    private var cachedFdrFJe: String? = null
+    var cachedSnlm0e: String? = null
+        internal set
+    var cachedFdrFJe: String? = null
+        internal set
+    var cachedBuildLabel: String? = null
+        internal set
+
     private var reqIdCounter = 100000
 
     private fun nextReqId(): Int {
@@ -34,7 +39,7 @@ class GeminiWebClient(
     }
 
     /**
-     * Initializes tokens (SNlM0e, FdrFJe) by fetching the Gemini Web app page with user's cookies.
+     * Initializes tokens (SNlM0e, FdrFJe, cfb2h) by fetching the Gemini Web app page with user's cookies.
      * Also dynamically extracts available models from the web interface.
      */
     suspend fun refreshTokensAndFetchModels(): Result<List<GeminiModel>> = withContext(Dispatchers.IO) {
@@ -53,20 +58,8 @@ class GeminiWebClient(
                 }
                 val html = response.body?.string() ?: ""
 
-                // Extract SNlM0e token
-                val snlmMatcher = PATTERN_SNLM0E.matcher(html)
-                if (snlmMatcher.find()) {
-                    cachedSnlm0e = snlmMatcher.group(1)
-                    cachedSnlm0e?.let { authRepository.saveSnlm0eToken(it) }
-                }
+                extractTokensFromHtml(html)
 
-                // Extract FdrFJe (f.sid)
-                val fdrMatcher = PATTERN_FDRFJE.matcher(html)
-                if (fdrMatcher.find()) {
-                    cachedFdrFJe = fdrMatcher.group(1)
-                }
-
-                // Dynamically extract models
                 val models = parseModelsFromHtml(html)
                 Result.success(if (models.isNotEmpty()) models else GeminiModel.FALLBACK_MODELS)
             }
@@ -75,13 +68,30 @@ class GeminiWebClient(
         }
     }
 
+    internal fun extractTokensFromHtml(html: String) {
+        val snlmMatcher = PATTERN_SNLM0E.matcher(html)
+        if (snlmMatcher.find()) {
+            cachedSnlm0e = snlmMatcher.group(1)
+            cachedSnlm0e?.let { authRepository.saveSnlm0eToken(it) }
+        }
+
+        val fdrMatcher = PATTERN_FDRFJE.matcher(html)
+        if (fdrMatcher.find()) {
+            cachedFdrFJe = fdrMatcher.group(1)
+        }
+
+        val cfbMatcher = PATTERN_CFB2H.matcher(html)
+        if (cfbMatcher.find()) {
+            cachedBuildLabel = cfbMatcher.group(1)
+        }
+    }
+
     /**
      * Parse models dynamically from window.WIZ_global_data or UI configuration blocks in HTML.
      */
-    private fun parseModelsFromHtml(html: String): List<GeminiModel> {
+    internal fun parseModelsFromHtml(html: String): List<GeminiModel> {
         val extractedModels = mutableListOf<GeminiModel>()
         try {
-            // Check for model indicators in script payload
             val hasThinking = html.contains("thinking", ignoreCase = true) || html.contains("2.0-flash-thinking", ignoreCase = true)
             val hasFlash2 = html.contains("2.0 Flash", ignoreCase = true) || html.contains("gemini-2.0-flash", ignoreCase = true)
             val hasPro = html.contains("1.5 Pro", ignoreCase = true) || html.contains("Advanced", ignoreCase = true)
@@ -142,16 +152,14 @@ class GeminiWebClient(
         val snlm0e = cachedSnlm0e ?: authRepository.getSnlm0eToken() ?: ""
         val cookie = authRepository.getCookieString()
 
-        // Construct internal chat request array
         val innerPayload = JSONArray().apply {
-            put(prompt) // 0: prompt text
-            put(0)      // 1: index
-            put(if (conversationId.isNullOrBlank()) null else conversationId) // 2: convo id
-            put(null)   // 3: context
-            put(null)   // 4: context
-            put(null)   // 5: attachments array
+            put(prompt)
+            put(0)
+            put(if (conversationId.isNullOrBlank()) null else conversationId)
+            put(null)
+            put(null)
+            put(null)
 
-            // If audio is provided, attach audio data directly to payload
             if (audioBytes != null && audioBytes.isNotEmpty()) {
                 val audioObj = JSONObject().apply {
                     put("mimeType", "audio/mp4")
@@ -169,7 +177,7 @@ class GeminiWebClient(
 
         val fReq = JSONArray().apply {
             val rpcCall = JSONArray().apply {
-                put("upz0af") // Primary chat RPC id
+                put("upz0af")
                 put(requestPayload.toString())
                 put(null)
                 put("generic")
@@ -180,7 +188,8 @@ class GeminiWebClient(
         val postData = "f.req=" + URLEncoder.encode(fReq.toString(), "UTF-8") +
                 "&at=" + URLEncoder.encode(snlm0e, "UTF-8")
 
-        val url = "$BATCH_EXECUTE_URL?rpcids=upz0af&f.sid=${cachedFdrFJe ?: ""}&bl=boq_assistant-bard-web-server_20241020.00_p0&hl=ru&_reqid=${nextReqId()}&rt=c"
+        val bl = cachedBuildLabel ?: "boq_gemini-web-uiserver_20261020.01_p0"
+        val url = "$BATCH_EXECUTE_URL?rpcids=upz0af&f.sid=${cachedFdrFJe ?: ""}&bl=$bl&hl=ru&_reqid=${nextReqId()}&rt=c"
 
         val request = Request.Builder()
             .url(url)
@@ -192,7 +201,7 @@ class GeminiWebClient(
             .build()
 
         val fullTextBuilder = StringBuilder()
-        var currentConvoId = conversationId ?: ("c_" + System.currentTimeMillis())
+        val currentConvoId = conversationId ?: ("c_" + System.currentTimeMillis())
         val messageId = "m_" + System.currentTimeMillis()
 
         client.newCall(request).execute().use { response ->
@@ -216,7 +225,6 @@ class GeminiWebClient(
                 val currentLine = line ?: continue
                 if (currentLine.startsWith(")]}'") || currentLine.isBlank()) continue
 
-                // Parse streaming chunk
                 val delta = extractDeltaFromRpcChunk(currentLine)
                 if (!delta.isNullOrBlank()) {
                     fullTextBuilder.append(delta)
@@ -234,7 +242,6 @@ class GeminiWebClient(
             }
         }
 
-        // Final message
         emit(
             ChatMessage(
                 id = messageId,
@@ -250,7 +257,7 @@ class GeminiWebClient(
     /**
      * Extracts text delta from batchexecute RPC JSON format
      */
-    private fun extractDeltaFromRpcChunk(line: String): String? {
+    internal fun extractDeltaFromRpcChunk(line: String): String? {
         try {
             if (!line.startsWith("[[")) return null
             val outerArray = JSONArray(line)
@@ -293,7 +300,8 @@ class GeminiWebClient(
             val postData = "f.req=" + URLEncoder.encode(fReq, "UTF-8") +
                     "&at=" + URLEncoder.encode(snlm0e, "UTF-8")
 
-            val url = "$BATCH_EXECUTE_URL?rpcids=D9S7Re&f.sid=${cachedFdrFJe ?: ""}&hl=ru&_reqid=${nextReqId()}&rt=c"
+            val bl = cachedBuildLabel ?: "boq_gemini-web-uiserver_20261020.01_p0"
+            val url = "$BATCH_EXECUTE_URL?rpcids=D9S7Re&f.sid=${cachedFdrFJe ?: ""}&bl=$bl&hl=ru&_reqid=${nextReqId()}&rt=c"
 
             val request = Request.Builder()
                 .url(url)
@@ -316,7 +324,7 @@ class GeminiWebClient(
         }
     }
 
-    private fun parseConversationsFromBody(body: String): List<Conversation> {
+    internal fun parseConversationsFromBody(body: String): List<Conversation> {
         val list = mutableListOf<Conversation>()
         try {
             val pattern = Pattern.compile("\\[\"(c_[a-f0-9]+)\",\"([^\"]+)\"")
@@ -345,6 +353,7 @@ class GeminiWebClient(
 
         private val PATTERN_SNLM0E = Pattern.compile("\"SNlM0e\":\"([^\"]+)\"")
         private val PATTERN_FDRFJE = Pattern.compile("\"FdrFJe\":\"([^\"]+)\"")
+        private val PATTERN_CFB2H = Pattern.compile("\"cfb2h\":\"([^\"]+)\"")
     }
 }
 

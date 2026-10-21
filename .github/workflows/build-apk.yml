@@ -40,6 +40,9 @@ jobs:
       - name: Make gradlew executable
         run: chmod +x gradlew
 
+      - name: Run Unit Tests
+        run: ./gradlew test --stacktrace
+
       - name: Build Release APKs
         env:
           KEYSTORE_PATH: ${{ github.workspace }}/release.keystore
