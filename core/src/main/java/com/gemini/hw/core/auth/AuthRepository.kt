@@ -7,32 +7,45 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 
-class AuthRepository(private val context: Context) {
+open class AuthRepository(private val context: Context) {
 
-    private val prefs: SharedPreferences = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+    private val prefs: SharedPreferences? by lazy {
+        try {
+            context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        } catch (_: Exception) {
+            null
+        }
+    }
 
-    private val _isLoggedIn = MutableStateFlow(hasValidSession())
-    val isLoggedIn: StateFlow<Boolean> = _isLoggedIn.asStateFlow()
+    private val _isLoggedIn = MutableStateFlow(false)
+    open val isLoggedIn: StateFlow<Boolean> = _isLoggedIn.asStateFlow()
 
-    private val _userEmail = MutableStateFlow(prefs.getString(KEY_USER_EMAIL, null))
-    val userEmail: StateFlow<String?> = _userEmail.asStateFlow()
+    private val _userEmail = MutableStateFlow<String?>(null)
+    open val userEmail: StateFlow<String?> = _userEmail.asStateFlow()
 
-    fun hasValidSession(): Boolean {
-        val psid = prefs.getString(KEY_PSID, null)
-        val snlm0e = prefs.getString(KEY_SNLM0E, null)
+    init {
+        try {
+            _isLoggedIn.value = hasValidSession()
+            _userEmail.value = prefs?.getString(KEY_USER_EMAIL, null)
+        } catch (_: Exception) {}
+    }
+
+    open fun hasValidSession(): Boolean {
+        val psid = prefs?.getString(KEY_PSID, null)
+        val snlm0e = prefs?.getString(KEY_SNLM0E, null)
         return !psid.isNullOrBlank() || !snlm0e.isNullOrBlank()
     }
 
-    fun getCookieString(): String {
-        return prefs.getString(KEY_COOKIES, "") ?: ""
+    open fun getCookieString(): String {
+        return prefs?.getString(KEY_COOKIES, "") ?: ""
     }
 
-    fun getSnlm0eToken(): String? {
-        return prefs.getString(KEY_SNLM0E, null)
+    open fun getSnlm0eToken(): String? {
+        return prefs?.getString(KEY_SNLM0E, null)
     }
 
-    fun saveSessionFromCookies(cookieString: String, snlm0e: String? = null, email: String? = null) {
-        val editor = prefs.edit()
+    open fun saveSessionFromCookies(cookieString: String, snlm0e: String? = null, email: String? = null) {
+        val editor = prefs?.edit() ?: return
         editor.putString(KEY_COOKIES, cookieString)
 
         val cookies = parseCookieHeader(cookieString)
@@ -52,12 +65,12 @@ class AuthRepository(private val context: Context) {
         _isLoggedIn.value = true
     }
 
-    fun saveSnlm0eToken(token: String) {
-        prefs.edit().putString(KEY_SNLM0E, token).apply()
+    open fun saveSnlm0eToken(token: String) {
+        prefs?.edit()?.putString(KEY_SNLM0E, token)?.apply()
         _isLoggedIn.value = hasValidSession()
     }
 
-    fun syncFromSystemCookieManager() {
+    open fun syncFromSystemCookieManager() {
         val cookieManager = CookieManager.getInstance()
         val googleCookies = cookieManager.getCookie("https://gemini.google.com")
         if (!googleCookies.isNullOrBlank()) {
@@ -65,8 +78,8 @@ class AuthRepository(private val context: Context) {
         }
     }
 
-    fun logout() {
-        prefs.edit().clear().apply()
+    open fun logout() {
+        prefs?.edit()?.clear()?.apply()
         try {
             CookieManager.getInstance().removeAllCookies(null)
             CookieManager.getInstance().flush()
