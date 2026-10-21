@@ -1,5 +1,6 @@
 package com.gemini.hw.core
 
+import com.gemini.hw.core.auth.AuthRepository
 import com.gemini.hw.core.network.GeminiWebClient
 import org.junit.Assert.*
 import org.junit.Test
@@ -68,22 +69,14 @@ class GeminiWebClientTest {
     }
 }
 
-// Minimal mock
-class MockAuthRepository : com.gemini.hw.core.auth.AuthRepository(createMockContext()) {
+class MockAuthRepository : AuthRepository(null) {
     private var token: String? = null
+
     override fun saveSnlm0eToken(token: String) {
         this.token = token
     }
-    override fun getSnlm0eToken(): String? = token
-    override fun getCookieString(): String = "__Secure-1PSID=test_cookie"
 
-    companion object {
-        fun createMockContext(): android.content.Context {
-            // JVM reflection mock or mock instance
-            return java.lang.reflect.Proxy.newProxyInstance(
-                android.content.Context::class.java.classLoader,
-                arrayOf(android.content.Context::class.java)
-            ) { _, _, _ -> null } as android.content.Context
-        }
-    }
+    override fun getSnlm0eToken(): String? = token
+
+    override fun getCookieString(): String = "__Secure-1PSID=test_cookie"
 }

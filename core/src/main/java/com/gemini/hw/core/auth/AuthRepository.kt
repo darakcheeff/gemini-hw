@@ -7,11 +7,11 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 
-open class AuthRepository(private val context: Context) {
+open class AuthRepository(private val context: Context? = null) {
 
     private val prefs: SharedPreferences? by lazy {
         try {
-            context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            context?.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
         } catch (_: Exception) {
             null
         }
@@ -71,11 +71,13 @@ open class AuthRepository(private val context: Context) {
     }
 
     open fun syncFromSystemCookieManager() {
-        val cookieManager = CookieManager.getInstance()
-        val googleCookies = cookieManager.getCookie("https://gemini.google.com")
-        if (!googleCookies.isNullOrBlank()) {
-            saveSessionFromCookies(googleCookies)
-        }
+        try {
+            val cookieManager = CookieManager.getInstance()
+            val googleCookies = cookieManager.getCookie("https://gemini.google.com")
+            if (!googleCookies.isNullOrBlank()) {
+                saveSessionFromCookies(googleCookies)
+            }
+        } catch (_: Exception) {}
     }
 
     open fun logout() {
