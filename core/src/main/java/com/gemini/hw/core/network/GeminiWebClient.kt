@@ -416,15 +416,8 @@ class GeminiWebClient(
                 put(null)
                 put(1)
             }
-            val fReq = JSONArray().apply {
-                put(JSONArray().apply {
-                    put("hNvQHb")
-                    put(innerPayload.toString())
-                    put(null)
-                    put("generic")
-                })
-            }
-            val postData = "f.req=" + URLEncoder.encode(fReq.toString(), "UTF-8") + "&at=" + URLEncoder.encode(snlm0e, "UTF-8")
+            val fReq = "[[[\"hNvQHb\",\"${innerPayload.toString().replace("\"", "\\\"")}\",null,\"generic\"]]]"
+            val postData = "f.req=" + URLEncoder.encode(fReq, "UTF-8") + "&at=" + URLEncoder.encode(snlm0e, "UTF-8")
             val url = "$BATCH_EXECUTE_URL?rpcids=hNvQHb&f.sid=$fsid&bl=$bl&hl=ru&_reqid=${nextReqId()}&rt=c"
 
             Log.d("GeminiWebClient", "getConversationMessages calling URL: $url for $conversationId")
@@ -443,7 +436,9 @@ class GeminiWebClient(
             client.newCall(request).execute().use { response ->
                 Log.d("GeminiWebClient", "getConversationMessages responseCode: ${response.code}")
                 if (!response.isSuccessful) {
-                    return@withContext Result.failure(Exception("HTTP ${response.code}"))
+                    val errBody = response.body?.string() ?: ""
+                    Log.e("GeminiWebClient", "getConversationMessages error body: $errBody")
+                    return@withContext Result.failure(Exception("HTTP ${response.code}: $errBody"))
                 }
                 val body = response.body?.string() ?: ""
                 val messages = parseMessagesFromBody(body, conversationId)
