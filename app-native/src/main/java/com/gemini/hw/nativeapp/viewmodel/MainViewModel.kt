@@ -53,27 +53,31 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val activeCanvas: StateFlow<CanvasDocument?> = _activeCanvas.asStateFlow()
 
     init {
-        if (authRepository.hasValidSession()) {
-            loadInitialData()
-        }
+        loadInitialData()
     }
 
     fun loadInitialData() {
         viewModelScope.launch {
             _isLoading.value = true
-            // Dynamic model list fetch from gemini.google.com
+
+            // 1. Dynamic model list fetch from gemini.google.com (always runs)
             val modelResult = client.refreshTokensAndFetchModels()
             if (modelResult.isSuccess) {
                 val fetchedModels = modelResult.getOrThrow()
-                _models.value = fetchedModels
-                _selectedModel.value = fetchedModels.firstOrNull { it.isDefault } ?: fetchedModels.first()
+                if (fetchedModels.isNotEmpty()) {
+                    _models.value = fetchedModels
+                    _selectedModel.value = fetchedModels.firstOrNull { it.isDefault } ?: fetchedModels.first()
+                }
             }
 
-            // Sync conversations
-            val convoResult = client.getConversations()
-            if (convoResult.isSuccess) {
-                _conversations.value = convoResult.getOrThrow()
+            // 2. Sync conversations if logged in
+            if (authRepository.hasValidSession()) {
+                val convoResult = client.getConversations()
+                if (convoResult.isSuccess) {
+                    _conversations.value = convoResult.getOrThrow()
+                }
             }
+
             _isLoading.value = false
         }
     }

@@ -34,12 +34,19 @@ class GeminiWebClientTest {
         val authRepo = MockAuthRepository()
         val client = GeminiWebClient(authRepo)
 
-        val htmlWithNewModels = "Available models: gemini-2.0-flash, 1.5 Pro Advanced, and 2.0-flash-thinking mode"
+        val htmlWithNewModels = """
+            <script>window.WIZ_global_data = {
+                "45702952":"[[\"gemini-2.0-flash\",\"gemini-2.5-flash\",\"gemini-3-flash-preview\"]]\"
+            };</script>
+            <div>Models: "gemini-1.5-pro", "gemini-2.0-flash-thinking"</div>
+        """.trimIndent()
         val models = client.parseModelsFromHtml(htmlWithNewModels)
 
         assertTrue(models.any { it.id == "gemini-2.0-flash" })
         assertTrue(models.any { it.id == "gemini-1.5-pro" })
         assertTrue(models.any { it.id == "gemini-2.0-flash-thinking" })
+        assertTrue(models.any { it.id == "gemini-2.5-flash" })
+        assertTrue(models.any { it.id == "gemini-3-flash-preview" })
     }
 
     @Test

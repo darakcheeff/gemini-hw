@@ -20,6 +20,9 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.MenuBook
+import androidx.compose.material.icons.automirrored.filled.Logout
+import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -28,6 +31,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -81,14 +85,12 @@ fun MainScreen(viewModel: MainViewModel) {
     var inputText by remember { mutableStateOf("") }
     val listState = rememberLazyListState()
 
-    // Auto-scroll when new messages arrive
     LaunchedEffect(messages.size, messages.lastOrNull()?.text?.length) {
         if (messages.isNotEmpty()) {
             listState.animateScrollToItem(messages.size - 1)
         }
     }
 
-    // Permission launcher for microphone
     val permissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestPermission()
     ) { isGranted ->
@@ -99,7 +101,6 @@ fun MainScreen(viewModel: MainViewModel) {
         }
     }
 
-    // Login launcher
     val loginLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.StartActivityForResult()
     ) { result ->
@@ -140,10 +141,9 @@ fun MainScreen(viewModel: MainViewModel) {
                 Spacer(modifier = Modifier.height(12.dp))
                 HorizontalDivider()
 
-                // Special sections
                 NavigationDrawerItem(
                     label = { Text("Блокноты (Gems)") },
-                    icon = { Icon(Icons.Default.MenuBook, contentDescription = null) },
+                    icon = { Icon(Icons.AutoMirrored.Filled.MenuBook, contentDescription = null) },
                     selected = false,
                     onClick = {
                         coroutineScope.launch { drawerState.close() }
@@ -175,36 +175,59 @@ fun MainScreen(viewModel: MainViewModel) {
                 Spacer(modifier = Modifier.height(8.dp))
 
                 Text(
-                    "История чатов",
+                    if (isLoggedIn) "История чатов" else "История чатов (требуется вход)",
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp)
                 )
 
                 LazyColumn(modifier = Modifier.weight(1f)) {
-                    items(conversations) { convo ->
-                        NavigationDrawerItem(
-                            label = { Text(convo.title, maxLines = 1, overflow = TextOverflow.Ellipsis) },
-                            selected = convo.id == currentConvoId,
-                            onClick = {
-                                viewModel.selectConversation(convo.id)
-                                coroutineScope.launch { drawerState.close() }
-                            },
-                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 2.dp)
-                        )
+                    if (conversations.isEmpty()) {
+                        item {
+                            Text(
+                                if (isLoggedIn) "Чатов пока нет" else "Войдите в аккаунт для загрузки истории",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+                                modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
+                            )
+                        }
+                    } else {
+                        items(conversations) { convo ->
+                            NavigationDrawerItem(
+                                label = { Text(convo.title, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                                selected = convo.id == currentConvoId,
+                                onClick = {
+                                    viewModel.selectConversation(convo.id)
+                                    coroutineScope.launch { drawerState.close() }
+                                },
+                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 2.dp)
+                            )
+                        }
                     }
                 }
 
                 HorizontalDivider()
-                NavigationDrawerItem(
-                    label = { Text("Выйти из аккаунта") },
-                    icon = { Icon(Icons.Default.Logout, contentDescription = null) },
-                    selected = false,
-                    onClick = {
-                        viewModel.logout()
-                        coroutineScope.launch { drawerState.close() }
-                    }
-                )
+                if (isLoggedIn) {
+                    NavigationDrawerItem(
+                        label = { Text("Выйти из аккаунта") },
+                        icon = { Icon(Icons.AutoMirrored.Filled.Logout, contentDescription = null) },
+                        selected = false,
+                        onClick = {
+                            viewModel.logout()
+                            coroutineScope.launch { drawerState.close() }
+                        }
+                    )
+                } else {
+                    NavigationDrawerItem(
+                        label = { Text("Войти через Google") },
+                        icon = { Icon(Icons.Default.Login, contentDescription = null) },
+                        selected = false,
+                        onClick = {
+                            coroutineScope.launch { drawerState.close() }
+                            loginLauncher.launch(Intent(context, LoginActivity::class.java))
+                        }
+                    )
+                }
                 Spacer(modifier = Modifier.height(12.dp))
             }
         }
@@ -235,190 +258,201 @@ fun MainScreen(viewModel: MainViewModel) {
                 )
             }
         ) { paddingValues ->
-            Box(
+            Column(
                 modifier = Modifier
                     .fillMaxSize()
                     .padding(paddingValues)
                     .background(MaterialTheme.colorScheme.background)
             ) {
+                // If not logged in, show an unobtrusive dismissible/clickable top banner
                 if (!isLoggedIn) {
-                    // Not logged in empty state
-                    Column(
+                    Surface(
+                        color = MaterialTheme.colorScheme.surfaceVariant,
                         modifier = Modifier
-                            .fillMaxSize()
-                            .padding(24.dp),
-                        verticalArrangement = Arrangement.Center,
-                        horizontalAlignment = Alignment.CenterHorizontally
-                    ) {
-                        Icon(
-                            Icons.Default.AutoAwesome,
-                            contentDescription = null,
-                            modifier = Modifier.size(64.dp),
-                            tint = MaterialTheme.colorScheme.primary
-                        )
-                        Spacer(modifier = Modifier.height(16.dp))
-                        Text(
-                            "Добро пожаловать в Gemini",
-                            style = MaterialTheme.typography.headlineSmall,
-                            color = MaterialTheme.colorScheme.onBackground
-                        )
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Text(
-                            "Автономный клиент для Huawei без зависимости от сервисов Google (GMS)",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                        Spacer(modifier = Modifier.height(24.dp))
-                        Button(
-                            onClick = {
+                            .fillMaxWidth()
+                            .clickable {
                                 loginLauncher.launch(Intent(context, LoginActivity::class.java))
-                            },
-                            shape = RoundedCornerShape(12.dp)
+                            }
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 16.dp, vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
                         ) {
-                            Text("Войти через Google")
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Icon(
+                                    Icons.Default.AccountCircle,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text(
+                                    "Войдите в аккаунт для синхронизации чатов",
+                                    fontSize = 12.sp,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                            Text(
+                                "Войти",
+                                fontSize = 13.sp,
+                                color = MaterialTheme.colorScheme.primary,
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier.padding(start = 8.dp)
+                            )
                         }
                     }
-                } else {
-                    Column(modifier = Modifier.fillMaxSize()) {
-                        // Messages list
-                        LazyColumn(
-                            state = listState,
-                            modifier = Modifier
-                                .weight(1f)
-                                .fillMaxWidth()
-                        ) {
-                            if (messages.isEmpty()) {
-                                item {
-                                    Box(
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .padding(top = 100.dp),
-                                        contentAlignment = Alignment.Center
-                                    ) {
-                                        Text(
-                                            "Чем я могу помочь сегодня?",
-                                            style = MaterialTheme.typography.headlineSmall,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
-                                        )
-                                    }
-                                }
-                            } else {
-                                items(messages, key = { it.id }) { msg ->
-                                    MessageBubble(
-                                        message = msg,
-                                        onEdit = { newText -> viewModel.editMessage(msg.id, newText) },
-                                        onBranch = { viewModel.createBranchInNewChat(msg) },
-                                        onOpenCanvas = { doc -> viewModel.openCanvas(doc) }
+                }
+
+                // Messages list (ALWAYS accessible)
+                LazyColumn(
+                    state = listState,
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxWidth()
+                ) {
+                    if (messages.isEmpty()) {
+                        item {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(top = 80.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                    Icon(
+                                        Icons.Default.AutoAwesome,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(48.dp),
+                                        tint = MaterialTheme.colorScheme.primary
+                                    )
+                                    Spacer(modifier = Modifier.height(12.dp))
+                                    Text(
+                                        "Чем я могу помочь сегодня?",
+                                        style = MaterialTheme.typography.titleMedium,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
                                     )
                                 }
                             }
                         }
+                    } else {
+                        items(messages, key = { it.id }) { msg ->
+                            MessageBubble(
+                                message = msg,
+                                onEdit = { newText -> viewModel.editMessage(msg.id, newText) },
+                                onBranch = { viewModel.createBranchInNewChat(msg) },
+                                onOpenCanvas = { doc -> viewModel.openCanvas(doc) }
+                            )
+                        }
+                    }
+                }
 
-                        // Bottom Input Bar
-                        Surface(
-                            color = MaterialTheme.colorScheme.surface,
-                            tonalElevation = 2.dp
-                        ) {
-                            Column {
-                                if (isRecordingVoice) {
-                                    Row(
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .padding(horizontal = 16.dp, vertical = 8.dp),
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.SpaceBetween
-                                    ) {
-                                        Text(
-                                            "🔴 Запись голоса...",
-                                            color = MaterialTheme.colorScheme.error,
-                                            style = MaterialTheme.typography.bodyMedium
-                                        )
-                                        Button(
-                                            onClick = { viewModel.stopVoiceRecording() },
-                                            colors = ButtonDefaults.buttonColors(
-                                                containerColor = MaterialTheme.colorScheme.error
-                                            )
-                                        ) {
-                                            Text("Остановить и отправить")
-                                        }
-                                    }
-                                }
-
-                                Row(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .padding(horizontal = 12.dp, vertical = 8.dp),
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    OutlinedTextField(
-                                        value = inputText,
-                                        onValueChange = { inputText = it },
-                                        placeholder = { Text("Спросите о чем угодно…", fontSize = 14.sp) },
-                                        modifier = Modifier
-                                            .weight(1f)
-                                            .clip(RoundedCornerShape(24.dp)),
-                                        maxLines = 4,
-                                        shape = RoundedCornerShape(24.dp),
-                                        colors = OutlinedTextFieldDefaults.colors(
-                                            focusedBorderColor = MaterialTheme.colorScheme.primary,
-                                            unfocusedBorderColor = MaterialTheme.colorScheme.surfaceVariant
-                                        )
+                // Bottom Input Bar (ALWAYS active)
+                Surface(
+                    color = MaterialTheme.colorScheme.surface,
+                    tonalElevation = 2.dp
+                ) {
+                    Column {
+                        if (isRecordingVoice) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 16.dp, vertical = 8.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Text(
+                                    "🔴 Запись голоса...",
+                                    color = MaterialTheme.colorScheme.error,
+                                    style = MaterialTheme.typography.bodyMedium
+                                )
+                                Button(
+                                    onClick = { viewModel.stopVoiceRecording() },
+                                    colors = ButtonDefaults.buttonColors(
+                                        containerColor = MaterialTheme.colorScheme.error
                                     )
-
-                                    Spacer(modifier = Modifier.width(6.dp))
-
-                                    // Voice direct button
-                                    IconButton(
-                                        onClick = {
-                                            if (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
-                                                if (isRecordingVoice) {
-                                                    viewModel.stopVoiceRecording()
-                                                } else {
-                                                    viewModel.startVoiceRecording()
-                                                }
-                                            } else {
-                                                permissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
-                                            }
-                                        },
-                                        modifier = Modifier
-                                            .size(42.dp)
-                                            .clip(CircleShape)
-                                            .background(if (isRecordingVoice) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.surfaceVariant)
-                                    ) {
-                                        Icon(
-                                            Icons.Default.Mic,
-                                            contentDescription = "Голосовой ввод",
-                                            tint = if (isRecordingVoice) Color.White else MaterialTheme.colorScheme.onSurface
-                                        )
-                                    }
-
-                                    Spacer(modifier = Modifier.width(6.dp))
-
-                                    // Send button
-                                    IconButton(
-                                        onClick = {
-                                            if (inputText.isNotBlank()) {
-                                                val textToSend = inputText
-                                                inputText = ""
-                                                viewModel.sendMessage(textToSend)
-                                            }
-                                        },
-                                        enabled = inputText.isNotBlank() && !isLoading,
-                                        modifier = Modifier
-                                            .size(42.dp)
-                                            .clip(CircleShape)
-                                            .background(
-                                                if (inputText.isNotBlank() && !isLoading) MaterialTheme.colorScheme.primary
-                                                else MaterialTheme.colorScheme.surfaceVariant
-                                            )
-                                    ) {
-                                        Icon(
-                                            Icons.Default.Send,
-                                            contentDescription = "Отправить",
-                                            tint = if (inputText.isNotBlank() && !isLoading) Color.White else MaterialTheme.colorScheme.onSurfaceVariant
-                                        )
-                                    }
+                                ) {
+                                    Text("Остановить и отправить")
                                 }
+                            }
+                        }
+
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 12.dp, vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            OutlinedTextField(
+                                value = inputText,
+                                onValueChange = { inputText = it },
+                                placeholder = { Text("Спросите о чем угодно…", fontSize = 14.sp) },
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .clip(RoundedCornerShape(24.dp)),
+                                maxLines = 4,
+                                shape = RoundedCornerShape(24.dp),
+                                colors = OutlinedTextFieldDefaults.colors(
+                                    focusedBorderColor = MaterialTheme.colorScheme.primary,
+                                    unfocusedBorderColor = MaterialTheme.colorScheme.surfaceVariant
+                                )
+                            )
+
+                            Spacer(modifier = Modifier.width(6.dp))
+
+                            IconButton(
+                                onClick = {
+                                    if (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
+                                        if (isRecordingVoice) {
+                                            viewModel.stopVoiceRecording()
+                                        } else {
+                                            viewModel.startVoiceRecording()
+                                        }
+                                    } else {
+                                        permissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                                    }
+                                },
+                                modifier = Modifier
+                                    .size(42.dp)
+                                    .clip(CircleShape)
+                                    .background(if (isRecordingVoice) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.surfaceVariant)
+                            ) {
+                                Icon(
+                                    Icons.Default.Mic,
+                                    contentDescription = "Голосовой ввод",
+                                    tint = if (isRecordingVoice) Color.White else MaterialTheme.colorScheme.onSurface
+                                )
+                            }
+
+                            Spacer(modifier = Modifier.width(6.dp))
+
+                            IconButton(
+                                onClick = {
+                                    if (inputText.isNotBlank()) {
+                                        val textToSend = inputText
+                                        inputText = ""
+                                        viewModel.sendMessage(textToSend)
+                                    }
+                                },
+                                enabled = inputText.isNotBlank() && !isLoading,
+                                modifier = Modifier
+                                    .size(42.dp)
+                                    .clip(CircleShape)
+                                    .background(
+                                        if (inputText.isNotBlank() && !isLoading) MaterialTheme.colorScheme.primary
+                                        else MaterialTheme.colorScheme.surfaceVariant
+                                    )
+                            ) {
+                                Icon(
+                                    Icons.AutoMirrored.Filled.Send,
+                                    contentDescription = "Отправить",
+                                    tint = if (inputText.isNotBlank() && !isLoading) Color.White else MaterialTheme.colorScheme.onSurfaceVariant
+                                )
                             }
                         }
                     }
@@ -427,7 +461,6 @@ fun MainScreen(viewModel: MainViewModel) {
         }
     }
 
-    // Canvas Dialog
     activeCanvas?.let { doc ->
         CanvasDialog(
             document = doc,
@@ -438,7 +471,6 @@ fun MainScreen(viewModel: MainViewModel) {
         )
     }
 
-    // Gems Dialog
     if (showGemsDialog) {
         GemsDialog(
             gems = gems,
@@ -449,7 +481,6 @@ fun MainScreen(viewModel: MainViewModel) {
         )
     }
 
-    // Spark Dialog
     if (showSparkDialog) {
         SparkDialog(
             tasks = sparkTasks,
@@ -457,7 +488,6 @@ fun MainScreen(viewModel: MainViewModel) {
         )
     }
 
-    // Scheduled Dialog
     if (showScheduledDialog) {
         ScheduledDialog(
             items = scheduledItems,

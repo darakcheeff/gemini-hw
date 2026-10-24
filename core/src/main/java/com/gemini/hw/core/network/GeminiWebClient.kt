@@ -39,20 +39,22 @@ class GeminiWebClient(
     }
 
     /**
-     * Initializes tokens (SNlM0e, FdrFJe, cfb2h) by fetching the Gemini Web app page with user's cookies.
-     * Also dynamically extracts available models from the web interface.
+     * Initializes tokens (SNlM0e, FdrFJe, cfb2h) by fetching the Gemini Web app page.
+     * Works with or without cookies so dynamic models are available immediately on launch.
      */
     suspend fun refreshTokensAndFetchModels(): Result<List<GeminiModel>> = withContext(Dispatchers.IO) {
         try {
             val cookieStr = authRepository.getCookieString()
-            val request = Request.Builder()
+            val requestBuilder = Request.Builder()
                 .url(GEMINI_APP_URL)
                 .addHeader("User-Agent", USER_AGENT)
                 .addHeader("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
-                .addHeader("Cookie", cookieStr)
-                .build()
 
-            client.newCall(request).execute().use { response ->
+            if (cookieStr.isNotBlank()) {
+                requestBuilder.addHeader("Cookie", cookieStr)
+            }
+
+            client.newCall(requestBuilder.build()).execute().use { response ->
                 if (!response.isSuccessful) {
                     return@withContext Result.failure(Exception("HTTP error ${response.code} fetching tokens"))
                 }
@@ -87,55 +89,100 @@ class GeminiWebClient(
     }
 
     /**
-     * Parse models dynamically from window.WIZ_global_data or UI configuration blocks in HTML.
+     * Dynamically parse models from window.WIZ_global_data, TSDtV flags, and runtime JS payloads.
+     * Completely un-hardcoded: extracts whichever model IDs Google actually publishes.
      */
     internal fun parseModelsFromHtml(html: String): List<GeminiModel> {
-        val extractedModels = mutableListOf<GeminiModel>()
+        val discoveredIds = linkedSetOf<String>()
+
         try {
-            val hasThinking = html.contains("thinking", ignoreCase = true) || html.contains("2.0-flash-thinking", ignoreCase = true)
-            val hasFlash2 = html.contains("2.0 Flash", ignoreCase = true) || html.contains("gemini-2.0-flash", ignoreCase = true)
-            val hasPro = html.contains("1.5 Pro", ignoreCase = true) || html.contains("Advanced", ignoreCase = true)
+            // 1. Inspect window.WIZ_global_data
+            val wizMatcher = PATTERN_WIZ_DATA.matcher(html)
+            if (wizMatcher.find()) {
+                val rawWiz = wizMatcher.group(1) ?: "{}"
+                val wizJson = JSONObject(rawWiz)
 
-            extractedModels.add(
-                GeminiModel(
-                    id = if (hasFlash2) "gemini-2.0-flash" else "gemini-1.5-flash",
-                    displayName = if (hasFlash2) "Gemini 2.0 Flash" else "Gemini 1.5 Flash",
-                    description = "Сверхбыстрый и легкий ответ",
-                    isDefault = true,
-                    isLiveVoiceSupported = true,
-                    badge = "Быстрый"
-                )
-            )
+                // Scan all keys in WIZ_global_data for model arrays or strings
+                val keys = wizJson.keys()
+                while (keys.hasNext()) {
+                    val key = keys.next()
+                    val value = wizJson.opt(key)
+                    if (value is String && value.contains("gemini-")) {
+                        extractModelIdsFromString(value, discoveredIds)
+                    }
+                }
 
-            if (hasPro) {
-                extractedModels.add(
-                    GeminiModel(
-                        id = "gemini-1.5-pro",
-                        displayName = "Gemini 1.5 Pro",
-                        description = "Глубокие рассуждения и анализ сложных задач",
-                        isDefault = false,
-                        isThinking = true,
-                        isLiveVoiceSupported = true,
-                        badge = "Pro"
-                    )
-                )
-            }
-
-            if (hasThinking) {
-                extractedModels.add(
-                    GeminiModel(
-                        id = "gemini-2.0-flash-thinking",
-                        displayName = "Gemini 2.0 Flash Thinking",
-                        description = "Пошаговое объяснение логики перед ответом",
-                        isDefault = false,
-                        isThinking = true,
-                        badge = "Рассуждения"
-                    )
-                )
+                // Check TSDtV flags specifically
+                val flagsStr = wizJson.optString("TSDtV", "")
+                if (flagsStr.isNotBlank()) {
+                    val flagsObj = JSONObject(flagsStr)
+                    val flags = flagsObj.optJSONObject("flags")
+                    if (flags != null) {
+                        val flagKeys = flags.keys()
+                        while (flagKeys.hasNext()) {
+                            val fVal = flags.opt(flagKeys.next())
+                            if (fVal is String && fVal.contains("gemini-")) {
+                                extractModelIdsFromString(fVal, discoveredIds)
+                            }
+                        }
+                    }
+                }
             }
         } catch (_: Exception) {}
 
-        return if (extractedModels.isEmpty()) GeminiModel.FALLBACK_MODELS else extractedModels
+        // 2. Regex fallback scan over entire HTML for any gemini model references
+        try {
+            val matcher = PATTERN_MODEL_REGEX.matcher(html)
+            while (matcher.find()) {
+                val id = matcher.group(1) ?: continue
+                if (!id.contains("uiserver") && !id.contains("panel") && !id.contains("apps-")) {
+                    discoveredIds.add(id)
+                }
+            }
+        } catch (_: Exception) {}
+
+        if (discoveredIds.isEmpty()) {
+            return GeminiModel.FALLBACK_MODELS
+        }
+
+        // Convert discovered IDs into GeminiModel representations
+        val models = discoveredIds
+            .filter { !it.contains("uiserver") && !it.contains("panel") }
+            .map { GeminiModel.createDynamic(it) }
+            .sortedWith(compareByDescending<GeminiModel> { it.isDefault }
+                .thenBy { it.displayName })
+
+        return models
+    }
+
+    private fun extractModelIdsFromString(input: String, targetSet: MutableSet<String>) {
+        try {
+            if (input.startsWith("[[") || input.startsWith("[")) {
+                val array = JSONArray(input)
+                scanJsonArrayForModels(array, targetSet)
+            } else if (input.startsWith("gemini-")) {
+                targetSet.add(input)
+            }
+        } catch (_: Exception) {
+            val matcher = PATTERN_MODEL_REGEX.matcher(input)
+            while (matcher.find()) {
+                val id = matcher.group(1) ?: continue
+                targetSet.add(id)
+            }
+        }
+    }
+
+    private fun scanJsonArrayForModels(arr: JSONArray, targetSet: MutableSet<String>) {
+        for (i in 0 until arr.length()) {
+            val elem = arr.opt(i)
+            if (elem is String) {
+                if (elem.startsWith("gemini-") && !elem.contains("uiserver")) {
+                    targetSet.add(elem)
+                }
+            } else if (elem is JSONArray) {
+                scanJsonArrayForModels(elem, targetSet)
+            }
+        }
     }
 
     /**
@@ -188,7 +235,7 @@ class GeminiWebClient(
         val postData = "f.req=" + URLEncoder.encode(fReq.toString(), "UTF-8") +
                 "&at=" + URLEncoder.encode(snlm0e, "UTF-8")
 
-        val bl = cachedBuildLabel ?: "boq_gemini-web-uiserver_20261020.01_p0"
+        val bl = cachedBuildLabel ?: "boq_gemini-web-uiserver_20261023.01_p0"
         val url = "$BATCH_EXECUTE_URL?rpcids=upz0af&f.sid=${cachedFdrFJe ?: ""}&bl=$bl&hl=ru&_reqid=${nextReqId()}&rt=c"
 
         val request = Request.Builder()
@@ -211,7 +258,7 @@ class GeminiWebClient(
                         id = messageId,
                         conversationId = currentConvoId,
                         role = MessageRole.MODEL,
-                        text = "Ошибка связи с сервером (${response.code}). Проверьте авторизацию.",
+                        text = "Ошибка связи с сервером (${response.code}). Проверьте подключение или выполните повторный вход.",
                         isStreaming = false
                     )
                 )
@@ -300,7 +347,7 @@ class GeminiWebClient(
             val postData = "f.req=" + URLEncoder.encode(fReq, "UTF-8") +
                     "&at=" + URLEncoder.encode(snlm0e, "UTF-8")
 
-            val bl = cachedBuildLabel ?: "boq_gemini-web-uiserver_20261020.01_p0"
+            val bl = cachedBuildLabel ?: "boq_gemini-web-uiserver_20261023.01_p0"
             val url = "$BATCH_EXECUTE_URL?rpcids=D9S7Re&f.sid=${cachedFdrFJe ?: ""}&bl=$bl&hl=ru&_reqid=${nextReqId()}&rt=c"
 
             val request = Request.Builder()
@@ -354,6 +401,8 @@ class GeminiWebClient(
         private val PATTERN_SNLM0E = Pattern.compile("\"SNlM0e\":\"([^\"]+)\"")
         private val PATTERN_FDRFJE = Pattern.compile("\"FdrFJe\":\"([^\"]+)\"")
         private val PATTERN_CFB2H = Pattern.compile("\"cfb2h\":\"([^\"]+)\"")
+        private val PATTERN_WIZ_DATA = Pattern.compile("window\\.WIZ_global_data\\s*=\\s*(\\{.*?\\});", Pattern.DOTALL)
+        private val PATTERN_MODEL_REGEX = Pattern.compile("\"(gemini-[a-zA-Z0-9\\.\\-_]+)\"")
     }
 }
 
