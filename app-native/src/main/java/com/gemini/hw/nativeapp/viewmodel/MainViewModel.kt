@@ -85,9 +85,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 _conversations.value = convoResult.getOrThrow()
             }
 
-            // 3. Sync Gems and Spark
-            gemsAndSparkRepo.syncAll(client)
-
             _isLoading.value = false
         }
     }
