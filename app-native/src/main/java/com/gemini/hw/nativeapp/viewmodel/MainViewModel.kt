@@ -37,11 +37,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val _messages = MutableStateFlow<List<ChatMessage>>(emptyList())
     val messages: StateFlow<List<ChatMessage>> = _messages.asStateFlow()
 
-    private val _models = MutableStateFlow<List<GeminiModel>>(GeminiModel.FALLBACK_MODELS)
+    private val _models = MutableStateFlow<List<GeminiModel>>(GeminiModel.CURRENT_MODELS)
     val models: StateFlow<List<GeminiModel>> = _models.asStateFlow()
 
-    private val _selectedModel = MutableStateFlow<GeminiModel>(GeminiModel.FALLBACK_MODELS.first())
+    private val _selectedModel = MutableStateFlow<GeminiModel>(GeminiModel.MODEL_FLASH_3_8)
     val selectedModel: StateFlow<GeminiModel> = _selectedModel.asStateFlow()
+
+    private val _thinkingLevel = MutableStateFlow("Авто")
+    val thinkingLevel: StateFlow<String> = _thinkingLevel.asStateFlow()
 
     private val _isRecordingVoice = MutableStateFlow(false)
     val isRecordingVoice: StateFlow<Boolean> = _isRecordingVoice.asStateFlow()
@@ -94,6 +97,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun selectModel(model: GeminiModel) {
         _selectedModel.value = model
+    }
+
+    fun setThinkingLevel(level: String) {
+        _thinkingLevel.value = level
     }
 
     fun sendMessage(text: String) {

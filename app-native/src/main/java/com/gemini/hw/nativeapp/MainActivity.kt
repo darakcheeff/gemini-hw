@@ -70,6 +70,7 @@ fun MainScreen(viewModel: MainViewModel) {
     val messages by viewModel.messages.collectAsState()
     val models by viewModel.models.collectAsState()
     val selectedModel by viewModel.selectedModel.collectAsState()
+    val thinkingLevel by viewModel.thinkingLevel.collectAsState()
     val isRecordingVoice by viewModel.isRecordingVoice.collectAsState()
     val isLoading by viewModel.isLoading.collectAsState()
     val activeCanvas by viewModel.activeCanvas.collectAsState()
@@ -239,7 +240,9 @@ fun MainScreen(viewModel: MainViewModel) {
                         ModelSelectorDropdown(
                             models = models,
                             selectedModel = selectedModel,
-                            onModelSelected = { viewModel.selectModel(it) }
+                            onModelSelected = { viewModel.selectModel(it) },
+                            thinkingLevel = thinkingLevel,
+                            onThinkingLevelSelected = { viewModel.setThinkingLevel(it) }
                         )
                     },
                     navigationIcon = {
@@ -333,9 +336,9 @@ fun MainScreen(viewModel: MainViewModel) {
                                     )
                                     Spacer(modifier = Modifier.height(12.dp))
                                     Text(
-                                        "Чем я могу помочь сегодня?",
-                                        style = MaterialTheme.typography.titleMedium,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        "С чего начнем?",
+                                        style = MaterialTheme.typography.headlineMedium.copy(fontWeight = FontWeight.Medium),
+                                        color = MaterialTheme.colorScheme.onSurface
                                     )
                                 }
                             }
@@ -385,13 +388,31 @@ fun MainScreen(viewModel: MainViewModel) {
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(horizontal = 12.dp, vertical = 8.dp),
+                                .padding(horizontal = 8.dp, vertical = 8.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
+                            IconButton(
+                                onClick = {
+                                    Toast.makeText(context, "Прикрепление файлов и изображений", Toast.LENGTH_SHORT).show()
+                                },
+                                modifier = Modifier
+                                    .size(40.dp)
+                                    .clip(CircleShape)
+                                    .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
+                            ) {
+                                Icon(
+                                    Icons.Default.Add,
+                                    contentDescription = "Прикрепить файл",
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+
+                            Spacer(modifier = Modifier.width(6.dp))
+
                             OutlinedTextField(
                                 value = inputText,
                                 onValueChange = { inputText = it },
-                                placeholder = { Text("Спросите о чем угодно…", fontSize = 14.sp) },
+                                placeholder = { Text("Спросить Gemini", fontSize = 14.sp) },
                                 modifier = Modifier
                                     .weight(1f)
                                     .clip(RoundedCornerShape(24.dp)),

@@ -42,6 +42,8 @@ class GeminiWebClientTest {
         """.trimIndent()
         val models = client.parseModelsFromHtml(htmlWithNewModels)
 
+        assertTrue(models.any { it.id == "gemini-3.8-flash" })
+        assertTrue(models.any { it.id == "gemini-4-argon" })
         assertTrue(models.any { it.id == "gemini-2.0-flash" })
         assertTrue(models.any { it.id == "gemini-1.5-pro" })
         assertTrue(models.any { it.id == "gemini-2.0-flash-thinking" })

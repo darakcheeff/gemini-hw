@@ -139,17 +139,12 @@ class GeminiWebClient(
             }
         } catch (_: Exception) {}
 
-        if (discoveredIds.isEmpty()) {
-            return GeminiModel.FALLBACK_MODELS
-        }
-
-        val models = discoveredIds
+        val discoveredModels = discoveredIds
             .filter { !it.contains("uiserver") && !it.contains("panel") && !it.contains("apps-") }
             .map { GeminiModel.createDynamic(it) }
-            .sortedWith(compareByDescending<GeminiModel> { it.isDefault }
-                .thenBy { it.displayName })
 
-        return models
+        val allModels = (GeminiModel.CURRENT_MODELS + discoveredModels).distinctBy { it.id }
+        return allModels
     }
 
     private fun extractModelIdsFromString(input: String, targetSet: MutableSet<String>) {
@@ -399,7 +394,7 @@ class GeminiWebClient(
         private val PATTERN_FDRFJE = Pattern.compile("\"FdrFJe\":\"([^\"]+)\"")
         private val PATTERN_CFB2H = Pattern.compile("\"cfb2h\":\"([^\"]+)\"")
         private val PATTERN_WIZ_DATA = Pattern.compile("window\\.WIZ_global_data\\s*=\\s*(\\{.*?\\});", Pattern.DOTALL)
-        private val PATTERN_MODEL_REGEX = Pattern.compile("(?:\"|'|\\\\\"|\\b)(gemini-(?:[0-9]\\.[0-9]|[0-9])[a-zA-Z0-9\\.\\-_]*)(?:\"|'|\\\\\"|\\b)")
+        private val PATTERN_MODEL_REGEX = Pattern.compile("(?:\"|'|\\\\\"|\\b)(gemini-(?:[0-9]\\.[0-9]|[0-9])[a-zA-Z0-9\\.\\-_]*|gemini-4-argon|4-argon|argon)(?:\"|'|\\\\\"|\\b)", Pattern.CASE_INSENSITIVE)
     }
 }
 
