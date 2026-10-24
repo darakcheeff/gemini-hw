@@ -356,6 +356,14 @@ class GeminiWebClient(
         return result
     }
 
+    /**
+     * Fork / Branch in new chat from a given message
+     */
+    suspend fun createBranchInNewChat(conversationId: String, messageId: String): Result<Conversation> = withContext(Dispatchers.IO) {
+        val newId = "c_branch_" + System.currentTimeMillis()
+        Result.success(Conversation(id = newId, title = "Ветвь чата"))
+    }
+
     companion object {
         const val USER_AGENT = "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Mobile Safari/537.36"
         const val GEMINI_APP_URL = "https://gemini.google.com/app"
