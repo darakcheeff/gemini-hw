@@ -10,11 +10,11 @@ import android.os.Bundle
 import android.view.View
 import android.webkit.*
 import android.widget.*
-import androidx.appcompat.app.AppCompatActivity
+import androidx.activity.ComponentActivity
 import com.gemini.hw.core.auth.AuthRepository
 import com.gemini.hw.core.network.GeminiWebClient
 
-class LoginActivity : AppCompatActivity() {
+class LoginActivity : ComponentActivity() {
 
     private lateinit var webView: WebView
     private lateinit var progressBar: ProgressBar

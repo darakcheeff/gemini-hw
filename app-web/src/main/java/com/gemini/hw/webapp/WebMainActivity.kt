@@ -15,13 +15,13 @@ import android.webkit.*
 import android.widget.FrameLayout
 import android.widget.ProgressBar
 import android.widget.Toast
+import androidx.activity.ComponentActivity
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
 import com.gemini.hw.core.auth.AuthRepository
 import com.gemini.hw.core.network.GeminiWebClient
 
-class WebMainActivity : AppCompatActivity() {
+class WebMainActivity : ComponentActivity() {
 
     private lateinit var webView: WebView
     private lateinit var progressBar: ProgressBar

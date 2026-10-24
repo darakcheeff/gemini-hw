@@ -1,5 +1,5 @@
 <resources>
-    <style name="Theme.GeminiWeb" parent="Theme.MaterialComponents.DayNight.NoActionBar">
+    <style name="Theme.GeminiWeb" parent="android:Theme.Material.NoActionBar">
         <item name="android:statusBarColor">#121212</item>
         <item name="android:navigationBarColor">#121212</item>
         <item name="android:windowBackground">#121212</item>
