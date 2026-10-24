@@ -637,6 +637,8 @@ fun MainScreen(viewModel: MainViewModel) {
             }
         }
     }
+        }
+    }
 
     activeCanvas?.let { doc ->
         CanvasDialog(
@@ -767,12 +769,12 @@ fun MainScreen(viewModel: MainViewModel) {
 fun NotebookView(
     notebook: Notebook,
     conversations: List<Conversation>,
-    models: List<AiModel>,
-    selectedModel: AiModel?,
-    thinkingLevel: ThinkingLevel,
+    models: List<GeminiModel>,
+    selectedModel: GeminiModel?,
+    thinkingLevel: String,
     isLoading: Boolean,
-    onModelSelected: (AiModel) -> Unit,
-    onThinkingLevelSelected: (ThinkingLevel) -> Unit,
+    onModelSelected: (GeminiModel) -> Unit,
+    onThinkingLevelSelected: (String) -> Unit,
     onSelectConversation: (String) -> Unit,
     onConversationLongClick: (Conversation) -> Unit,
     onSendMessage: (String) -> Unit,
@@ -917,7 +919,7 @@ fun NotebookView(
                             modifier = Modifier.padding(horizontal = 8.dp)
                         ) {
                             Text(
-                                text = selectedModel?.name?.replace("Gemini ", "") ?: "Flash",
+                                text = selectedModel?.displayName?.replace("Gemini ", "") ?: "Flash",
                                 style = MaterialTheme.typography.labelMedium,
                                 color = MaterialTheme.colorScheme.onSurface
                             )
@@ -935,7 +937,7 @@ fun NotebookView(
                     ) {
                         models.forEach { model ->
                             DropdownMenuItem(
-                                text = { Text(model.name) },
+                                text = { Text(model.displayName) },
                                 onClick = {
                                     onModelSelected(model)
                                     showModelMenu = false
@@ -1037,10 +1039,11 @@ fun NotebookView(
                             overflow = TextOverflow.Ellipsis,
                             modifier = Modifier.weight(1f)
                         )
-                        if (!convo.dateText.isNullOrBlank()) {
+                        val dt = convo.dateText
+                        if (!dt.isNullOrBlank()) {
                             Spacer(modifier = Modifier.width(12.dp))
                             Text(
-                                text = convo.dateText,
+                                text = dt,
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
                             )
