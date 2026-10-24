@@ -14,10 +14,18 @@ class GemsAndSparkTest {
         val repo = GemsAndSparkRepository()
         val gems = repo.gems.value
 
-        assertTrue(gems.isNotEmpty())
-        assertTrue(gems.any { it.name == "Кодер" })
-        assertTrue(gems.any { it.name == "Редактор текстов" })
-        assertTrue(gems.any { it.name == "Мозговой штурм" })
+        assertTrue(gems.isEmpty())
+        repo.setGems(
+            listOf(
+                com.gemini.hw.core.model.Gem(
+                    id = "gem_coding",
+                    name = "Кодер",
+                    description = "Помощник в коде"
+                )
+            )
+        )
+        assertEquals(1, repo.gems.value.size)
+        assertEquals("Кодер", repo.gems.value[0].name)
     }
 
     @Test

@@ -469,14 +469,23 @@ class GeminiWebClient(
                                 val innerStr = chunk.optString(2, "")
                                 if (innerStr.isNotBlank() && innerStr != "null") {
                                     val innerData = JSONArray(innerStr)
-                                    val turns = innerData.optJSONArray(0) ?: innerData
+                                    var turns = innerData
+                                    while (turns.length() == 1 && turns.optJSONArray(0) != null && (turns.optJSONArray(0)?.length() ?: 0) > 0) {
+                                        val first = turns.optJSONArray(0)!!
+                                        val elem0 = first.optJSONArray(0)
+                                        if (elem0 != null && elem0.opt(0) is String && (elem0.opt(1) is String || elem0.length() == 1)) {
+                                            break
+                                        }
+                                        turns = first
+                                    }
                                     for (t in (turns.length() - 1) downTo 0) {
                                         val turn = turns.optJSONArray(t) ?: continue
                                         val turnId = turn.optJSONArray(0)?.optString(1, "turn_$t") ?: "turn_$t"
 
                                         // User text
-                                        val userText = turn.optJSONArray(2)?.optJSONArray(0)?.optString(0, "")
-                                            ?: turn.optJSONArray(1)?.optString(0, "")
+                                        val userArr = turn.optJSONArray(2) ?: turn.optJSONArray(1)
+                                        val userText = userArr?.optJSONArray(0)?.optString(0, "")
+                                            ?: userArr?.optString(0, "")
                                             ?: ""
                                         if (userText.isNotBlank()) {
                                             chronologicalList.add(
@@ -495,7 +504,8 @@ class GeminiWebClient(
                                         if (candidates != null && candidates.length() > 0) {
                                             val firstCand = candidates.optJSONArray(0)
                                             val parts = firstCand?.optJSONArray(1)
-                                            val modelText = parts?.optString(0, "")
+                                            val modelText = parts?.optJSONArray(0)?.optString(0, "")
+                                                ?: parts?.optString(0, "")
                                                 ?: firstCand?.optString(1, "")
                                                 ?: ""
                                             if (modelText.isNotBlank()) {
