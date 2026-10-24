@@ -62,13 +62,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun loadInitialData() {
         viewModelScope.launch {
             if (!authRepository.hasValidSession()) {
-                _isLoggedIn.value = false
                 _models.value = emptyList()
                 _selectedModel.value = null
                 _isLoading.value = false
                 return@launch
             }
-            _isLoggedIn.value = true
             _isLoading.value = true
 
             // 1. Dynamic model list fetch from authenticated Google session
@@ -88,7 +86,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             }
 
             // 3. Sync Gems and Spark
-            gemsAndSparkRepository.syncAll(client)
+            gemsAndSparkRepo.syncAll(client)
 
             _isLoading.value = false
         }
