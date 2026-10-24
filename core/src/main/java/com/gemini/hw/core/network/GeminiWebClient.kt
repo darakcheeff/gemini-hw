@@ -441,6 +441,7 @@ class GeminiWebClient(
                     return@withContext Result.failure(Exception("HTTP ${response.code}: $errBody"))
                 }
                 val body = response.body?.string() ?: ""
+                Log.d("GeminiWebClient", "getConversationMessages body len=${body.length}: ${body.take(500)}")
                 val messages = parseMessagesFromBody(body, conversationId)
                 Result.success(messages)
             }
@@ -463,25 +464,32 @@ class GeminiWebClient(
                             if (chunk.optString(0) == "wrb.fr" && chunk.optString(1) == "hNvQHb") {
                                 val innerStr = chunk.optString(2, "")
                                 if (innerStr.isNotBlank() && innerStr != "null") {
+                                    Log.d("GeminiWebClient", "hNvQHb innerStr: ${innerStr.take(500)}")
                                     val innerData = JSONArray(innerStr)
                                     var turns = innerData
-                                    while (turns.length() == 1 && turns.optJSONArray(0) != null && (turns.optJSONArray(0)?.length() ?: 0) > 0) {
-                                        val first = turns.optJSONArray(0)!!
-                                        val elem0 = first.optJSONArray(0)
-                                        if (elem0 != null && elem0.opt(0) is String && (elem0.opt(1) is String || elem0.length() == 1)) {
-                                            break
+                                    if (innerData.length() > 0 && innerData.optJSONArray(0) != null && (innerData.optJSONArray(0)?.length() ?: 0) > 0) {
+                                        val candidate = innerData.optJSONArray(0)!!
+                                        if (candidate.optJSONArray(0) != null) {
+                                            turns = candidate
                                         }
-                                        turns = first
                                     }
                                     for (t in (turns.length() - 1) downTo 0) {
                                         val turn = turns.optJSONArray(t) ?: continue
-                                        val turnId = turn.optJSONArray(0)?.optString(1, "turn_$t") ?: "turn_$t"
+                                        val turnId = turn.optJSONArray(0)?.optString(1)
+                                            ?: turn.optJSONArray(0)?.optString(0)
+                                            ?: turn.optString(0, "turn_$t")
 
                                         // User text
-                                        val userArr = turn.optJSONArray(2) ?: turn.optJSONArray(1)
-                                        val userText = userArr?.optJSONArray(0)?.optString(0, "")
-                                            ?: userArr?.optString(0, "")
-                                            ?: ""
+                                        var userText = ""
+                                        for (idx in listOf(2, 1, 3)) {
+                                            val userArr = turn.optJSONArray(idx)
+                                            val t1 = userArr?.optJSONArray(0)?.optString(0, "") ?: ""
+                                            val t2 = if (t1.isEmpty()) userArr?.optString(0, "") ?: "" else t1
+                                            if (t2.isNotBlank()) {
+                                                userText = t2
+                                                break
+                                            }
+                                        }
                                         if (userText.isNotBlank()) {
                                             chronologicalList.add(
                                                 ChatMessage(
@@ -494,25 +502,33 @@ class GeminiWebClient(
                                         }
 
                                         // Model response
-                                        val candidates = turn.optJSONArray(3)?.optJSONArray(0)
-                                            ?: turn.optJSONArray(2)
-                                        if (candidates != null && candidates.length() > 0) {
-                                            val firstCand = candidates.optJSONArray(0)
-                                            val parts = firstCand?.optJSONArray(1)
-                                            val modelText = parts?.optJSONArray(0)?.optString(0, "")
-                                                ?: parts?.optString(0, "")
-                                                ?: firstCand?.optString(1, "")
-                                                ?: ""
-                                            if (modelText.isNotBlank()) {
-                                                chronologicalList.add(
-                                                    ChatMessage(
-                                                        id = "m_$turnId",
-                                                        conversationId = conversationId,
-                                                        role = MessageRole.MODEL,
-                                                        text = modelText
-                                                    )
-                                                )
+                                        var modelText = ""
+                                        for (idx in listOf(3, 2, 4)) {
+                                            val cArr = turn.optJSONArray(idx)
+                                            if (cArr != null) {
+                                                val candList = cArr.optJSONArray(0) ?: cArr
+                                                val firstCand = candList.optJSONArray(0)
+                                                if (firstCand != null) {
+                                                    val parts = firstCand.optJSONArray(1)
+                                                    val m1 = parts?.optJSONArray(0)?.optString(0, "") ?: ""
+                                                    val m2 = if (m1.isEmpty()) parts?.optString(0, "") ?: "" else m1
+                                                    val m3 = if (m2.isEmpty()) firstCand.optString(1, "") else m2
+                                                    if (m3.isNotBlank()) {
+                                                        modelText = m3
+                                                        break
+                                                    }
+                                                }
                                             }
+                                        }
+                                        if (modelText.isNotBlank()) {
+                                            chronologicalList.add(
+                                                ChatMessage(
+                                                    id = "m_$turnId",
+                                                    conversationId = conversationId,
+                                                    role = MessageRole.MODEL,
+                                                    text = modelText
+                                                )
+                                            )
                                         }
                                     }
                                 }
@@ -646,46 +662,127 @@ class GeminiWebClient(
     }
 
     /**
-     * Load Notebooks from NotebookLM using wXbhsf RPC.
+     * Load Notebooks from Gemini Web using GraphQL executeQuery (and batchexecute fallback).
      */
     suspend fun getNotebooks(): Result<List<Notebook>> = withContext(Dispatchers.IO) {
         try {
             if (cachedSnlm0e.isNullOrBlank()) {
                 refreshTokensAndFetchModels()
             }
-            val snlm0e = cachedSnlm0e ?: authRepository.getSnlm0eToken() ?: ""
             val cookie = authRepository.getCookieString()
 
-            val fReq = "[[[\"wXbhsf\",\"[null,1,null,[2]]\",null,\"generic\"]]]"
-            val postData = "f.req=" + URLEncoder.encode(fReq, "UTF-8") + "&at=" + URLEncoder.encode(snlm0e, "UTF-8")
-            val url = "https://notebooklm.google.com/_/LabsTailwindUi/data/batchexecute?rpcids=wXbhsf&rt=c"
+            // 1. Primary: NotebooksDialogContentQuery via GEMINI_WEB_GRAPHQL executeQuery
+            val querySig1 = URLEncoder.encode("2//7i/6hNce8+k21vSBk6MXemEMhzGDBdQT11Mb+ykkII=", "UTF-8")
+            val url1 = "https://gemini.google.com/_/BardChatUi/graphql/schemas/GEMINI_WEB_GRAPHQL/executeQuery?query_signature=$querySig1"
+            Log.d("GeminiWebClient", "getNotebooks calling GraphQL: $url1")
 
-            Log.d("GeminiWebClient", "getNotebooks calling URL: $url")
-
-            val request = Request.Builder()
-                .url(url)
+            val request1 = Request.Builder()
+                .url(url1)
                 .addHeader("User-Agent", USER_AGENT)
-                .addHeader("Content-Type", "application/x-www-form-urlencoded;charset=UTF-8")
-                .addHeader("Origin", "https://notebooklm.google.com")
-                .addHeader("Referer", "https://notebooklm.google.com/")
+                .addHeader("Accept", "application/json")
+                .addHeader("Origin", "https://gemini.google.com")
+                .addHeader("Referer", "https://gemini.google.com/")
                 .addHeader("X-Same-Domain", "1")
                 .addHeader("Cookie", cookie)
-                .post(postData.toRequestBody("application/x-www-form-urlencoded;charset=UTF-8".toMediaType()))
+                .get()
                 .build()
 
-            client.newCall(request).execute().use { response ->
-                Log.d("GeminiWebClient", "getNotebooks responseCode: ${response.code}")
-                if (!response.isSuccessful) {
-                    return@withContext Result.failure(Exception("HTTP ${response.code}"))
+            var notebooks = emptyList<Notebook>()
+            client.newCall(request1).execute().use { response ->
+                Log.d("GeminiWebClient", "getNotebooks GraphQL responseCode: ${response.code}")
+                if (response.isSuccessful) {
+                    val body = response.body?.string() ?: ""
+                    Log.d("GeminiWebClient", "getNotebooks GraphQL body len=${body.length}: ${body.take(500)}")
+                    notebooks = parseNotebooksFromGraphQL(body)
                 }
-                val body = response.body?.string() ?: ""
-                val notebooks = parseNotebooksFromBody(body)
-                Result.success(notebooks)
             }
+
+            // 2. Fallback: ConversationActionsMenuNotebooksQuery
+            if (notebooks.isEmpty()) {
+                val querySig2 = URLEncoder.encode("2/qS9gIrxih7jaGqabrvcI40IW6HsXmz9Jxm6ei90HrDI=", "UTF-8")
+                val url2 = "https://gemini.google.com/_/BardChatUi/graphql/schemas/GEMINI_WEB_GRAPHQL/executeQuery?query_signature=$querySig2"
+                Log.d("GeminiWebClient", "getNotebooks calling fallback GraphQL: $url2")
+                val request2 = Request.Builder()
+                    .url(url2)
+                    .addHeader("User-Agent", USER_AGENT)
+                    .addHeader("Accept", "application/json")
+                    .addHeader("Origin", "https://gemini.google.com")
+                    .addHeader("Referer", "https://gemini.google.com/")
+                    .addHeader("X-Same-Domain", "1")
+                    .addHeader("Cookie", cookie)
+                    .get()
+                    .build()
+                client.newCall(request2).execute().use { response ->
+                    Log.d("GeminiWebClient", "getNotebooks fallback responseCode: ${response.code}")
+                    if (response.isSuccessful) {
+                        val body = response.body?.string() ?: ""
+                        Log.d("GeminiWebClient", "getNotebooks fallback body len=${body.length}: ${body.take(500)}")
+                        notebooks = parseNotebooksFromGraphQL(body)
+                    }
+                }
+            }
+
+            Log.d("GeminiWebClient", "getNotebooks total parsed: ${notebooks.size}")
+            Result.success(notebooks)
         } catch (e: Exception) {
             Log.e("GeminiWebClient", "getNotebooks failed: ${e.message}", e)
             Result.failure(e)
         }
+    }
+
+    internal fun parseNotebooksFromGraphQL(body: String): List<Notebook> {
+        val list = mutableListOf<Notebook>()
+        val seenIds = mutableSetOf<String>()
+        try {
+            for (line in body.split("\n")) {
+                val trimmed = line.trim()
+                if (trimmed.startsWith(")]}'") || trimmed.isEmpty()) continue
+                val root = try {
+                    if (trimmed.startsWith("{")) JSONObject(trimmed)
+                    else if (trimmed.startsWith("[")) JSONArray(trimmed).optJSONObject(0)
+                    else null
+                } catch (e: Exception) { null } ?: continue
+
+                val data = root.optJSONObject("data")
+                val viewer = data?.optJSONObject("viewer")
+                val rpcs = viewer?.optJSONObject("rpcs")
+
+                // 1. Check listNotebooks.notebooks
+                val listNb = rpcs?.optJSONObject("listNotebooks")
+                val nbArray = listNb?.optJSONArray("notebooks")
+                if (nbArray != null) {
+                    for (i in 0 until nbArray.length()) {
+                        val nb = nbArray.optJSONObject(i) ?: continue
+                        val id = nb.optString("id", "")
+                        val title = nb.optString("displayName", "").trim()
+                        val count = nb.optInt("sourceCount", 0)
+                        if (id.isNotBlank() && title.isNotBlank() && id !in seenIds) {
+                            seenIds.add(id)
+                            list.add(Notebook(id = id, title = title, content = if (count > 0) "Источников: $count" else ""))
+                        }
+                    }
+                }
+
+                // 2. Check notebooks.bots
+                val botsObj = rpcs?.optJSONObject("notebooks")
+                val botsArray = botsObj?.optJSONArray("bots")
+                if (botsArray != null) {
+                    for (i in 0 until botsArray.length()) {
+                        val bot = botsArray.optJSONObject(i) ?: continue
+                        val id = bot.optString("externalUrlId", "")
+                        val meta = bot.optJSONObject("publicMetadata")
+                        val title = meta?.optString("name", "")?.trim() ?: ""
+                        if (id.isNotBlank() && title.isNotBlank() && id !in seenIds) {
+                            seenIds.add(id)
+                            list.add(Notebook(id = id, title = title, content = ""))
+                        }
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            Log.e("GeminiWebClient", "parseNotebooksFromGraphQL error: ${e.message}", e)
+        }
+        return list
     }
 
     internal fun parseNotebooksFromBody(body: String): List<Notebook> {

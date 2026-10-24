@@ -87,6 +87,24 @@ class GeminiWebClientTest {
     }
 
     @Test
+    fun testNotebooksGraphQLParsing() {
+        val authRepo = MockAuthRepository()
+        val client = GeminiWebClient(authRepo)
+
+        val sampleGraphQL = """)]}'
+{"data":{"viewer":{"rpcs":{"listNotebooks":{"notebooks":[{"id":"nb_1","displayName":"китай 2026","createTime":123456,"sourceCount":3},{"id":"nb_2","displayName":"taobao идеи","createTime":123457,"sourceCount":0}]}}}}}"""
+        val notebooks = client.parseNotebooksFromGraphQL(sampleGraphQL)
+
+        assertEquals(2, notebooks.size)
+        assertEquals("nb_1", notebooks[0].id)
+        assertEquals("китай 2026", notebooks[0].title)
+        assertEquals("Источников: 3", notebooks[0].content)
+        assertEquals("nb_2", notebooks[1].id)
+        assertEquals("taobao идеи", notebooks[1].title)
+        assertEquals("", notebooks[1].content)
+    }
+
+    @Test
     fun testMessagesParsing() {
         val authRepo = MockAuthRepository()
         val client = GeminiWebClient(authRepo)

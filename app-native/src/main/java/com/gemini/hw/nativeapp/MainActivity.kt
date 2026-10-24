@@ -215,12 +215,12 @@ fun MainScreen(viewModel: MainViewModel) {
                 )
 
                 NavigationDrawerItem(
-                    label = { Text("Блокноты") },
-                    icon = { Icon(Icons.AutoMirrored.Filled.MenuBook, contentDescription = null) },
+                    label = { Text("Запланированное") },
+                    icon = { Icon(Icons.Default.Schedule, contentDescription = null) },
                     selected = false,
                     onClick = {
                         coroutineScope.launch { drawerState.close() }
-                        showNotebooksDialog = true
+                        showScheduledDialog = true
                     }
                 )
 
@@ -234,27 +234,72 @@ fun MainScreen(viewModel: MainViewModel) {
                     }
                 )
 
-                NavigationDrawerItem(
-                    label = { Text("Запланированное") },
-                    icon = { Icon(Icons.Default.Schedule, contentDescription = null) },
-                    selected = false,
-                    onClick = {
-                        coroutineScope.launch { drawerState.close() }
-                        showScheduledDialog = true
-                    }
-                )
-
                 HorizontalDivider()
-                Spacer(modifier = Modifier.height(8.dp))
-
-                Text(
-                    if (isLoggedIn) "История чатов" else "История чатов (требуется вход)",
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp)
-                )
+                Spacer(modifier = Modifier.height(4.dp))
 
                 LazyColumn(modifier = Modifier.weight(1f)) {
+                    // --- Блокноты Section (as in 2.png) ---
+                    item {
+                        Text(
+                            "Блокноты",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp)
+                        )
+                    }
+                    item {
+                        NavigationDrawerItem(
+                            label = { Text("Новый блокнот") },
+                            icon = { Icon(Icons.Default.Add, contentDescription = null) },
+                            selected = false,
+                            onClick = {
+                                coroutineScope.launch { drawerState.close() }
+                                showNotebooksDialog = true
+                            },
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 2.dp)
+                        )
+                    }
+                    if (notebooks.isNotEmpty()) {
+                        items(notebooks.take(4)) { nb ->
+                            NavigationDrawerItem(
+                                label = { Text(nb.title, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                                icon = { Icon(Icons.AutoMirrored.Filled.MenuBook, contentDescription = null) },
+                                selected = false,
+                                onClick = {
+                                    coroutineScope.launch { drawerState.close() }
+                                    viewModel.startNewChat()
+                                    viewModel.sendMessage("Используй материалы из блокнота '${nb.title}':\n${nb.content}\nЧто ты можешь предложить на основе этих данных?")
+                                },
+                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 2.dp)
+                            )
+                        }
+                    }
+                    item {
+                        NavigationDrawerItem(
+                            label = { Text("Все блокноты") },
+                            icon = { Icon(Icons.Default.MoreVert, contentDescription = null) },
+                            selected = false,
+                            onClick = {
+                                coroutineScope.launch { drawerState.close() }
+                                showNotebooksDialog = true
+                            },
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 2.dp)
+                        )
+                    }
+
+                    // --- Недавние Section (as in 2.png) ---
+                    item {
+                        Spacer(modifier = Modifier.height(6.dp))
+                        HorizontalDivider()
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Text(
+                            if (isLoggedIn) "Недавние" else "История чатов (требуется вход)",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp)
+                        )
+                    }
+
                     if (conversations.isEmpty()) {
                         item {
                             Text(
