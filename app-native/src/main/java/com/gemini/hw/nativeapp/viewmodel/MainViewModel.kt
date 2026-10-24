@@ -86,6 +86,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             // 3. Sync Gems (bots)
             refreshGems()
 
+            // 4. Sync Notebooks
+            refreshNotebooks()
+
             _isLoading.value = false
         }
     }
@@ -95,6 +98,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             val res = client.getGems()
             if (res.isSuccess) {
                 gemsAndSparkRepo.setGems(res.getOrThrow())
+            }
+        }
+    }
+
+    fun refreshNotebooks() {
+        viewModelScope.launch {
+            val res = client.getNotebooks()
+            if (res.isSuccess) {
+                gemsAndSparkRepo.setNotebooks(res.getOrThrow())
             }
         }
     }

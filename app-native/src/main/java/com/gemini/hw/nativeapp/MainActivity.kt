@@ -97,6 +97,8 @@ fun MainScreen(viewModel: MainViewModel) {
     LaunchedEffect(drawerState.isOpen) {
         if (drawerState.isOpen && isLoggedIn) {
             viewModel.refreshConversations()
+            viewModel.refreshGems()
+            viewModel.refreshNotebooks()
         }
     }
 

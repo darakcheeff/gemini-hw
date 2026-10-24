@@ -57,6 +57,49 @@ class GeminiWebClientTest {
         assertEquals("c_9e8f7a6b", convos[1].id)
         assertEquals("Написание статьи", convos[1].title)
     }
+
+    @Test
+    fun testGemsParsing() {
+        val authRepo = MockAuthRepository()
+        val client = GeminiWebClient(authRepo)
+
+        val sampleBody = """[["wrb.fr","CNgdBe","[null,null,[[\"productivity-helper\",[\"Productivity planner\",\"Stay on top of your work.\"]]]]"]]"""
+        val gems = client.parseGemsFromBody(sampleBody)
+
+        assertEquals(1, gems.size)
+        assertEquals("productivity-helper", gems[0].id)
+        assertEquals("Productivity planner", gems[0].name)
+        assertEquals("Stay on top of your work.", gems[0].description)
+    }
+
+    @Test
+    fun testNotebooksParsing() {
+        val authRepo = MockAuthRepository()
+        val client = GeminiWebClient(authRepo)
+
+        val sampleBody = """[["wrb.fr","wXbhsf","[[[\"Research Notebook\",[\"doc1\",\"doc2\"],\"nb_123\"]]]"]]"""
+        val notebooks = client.parseNotebooksFromBody(sampleBody)
+
+        assertEquals(1, notebooks.size)
+        assertEquals("nb_123", notebooks[0].id)
+        assertEquals("Research Notebook", notebooks[0].title)
+        assertEquals("Источников: 2", notebooks[0].content)
+    }
+
+    @Test
+    fun testMessagesParsing() {
+        val authRepo = MockAuthRepository()
+        val client = GeminiWebClient(authRepo)
+
+        val sampleBody = """[["wrb.fr","hNvQHb","[[[[\"t_1\",\"turn_1\"],null,[\"Привет Gemini\"],[[[\"rc_1\",[\"Привет! Чем помочь?\"]]]]]]]"]]"""
+        val messages = client.parseMessagesFromBody(sampleBody, "c_test")
+
+        assertEquals(2, messages.size)
+        assertEquals("Привет Gemini", messages[0].text)
+        assertEquals(com.gemini.hw.core.model.MessageRole.USER, messages[0].role)
+        assertEquals("Привет! Чем помочь?", messages[1].text)
+        assertEquals(com.gemini.hw.core.model.MessageRole.MODEL, messages[1].role)
+    }
 }
 
 class MockAuthRepository : AuthRepository(null) {
