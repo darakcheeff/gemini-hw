@@ -1,10 +1,12 @@
 package com.gemini.hw.core.network
 
+import android.util.Log
 import com.gemini.hw.core.auth.AuthRepository
 import com.gemini.hw.core.model.*
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
@@ -223,6 +225,8 @@ class GeminiWebClient(
         val fsid = cachedFdrFJe ?: ""
         val url = "$STREAM_GENERATE_URL?bl=$bl&f.sid=$fsid&hl=ru&_reqid=${nextReqId()}&rt=c"
 
+        Log.d("GeminiWebClient", "Sending StreamGenerate request, convoId=$conversationId, prompt=$prompt")
+
         val request = Request.Builder()
             .url(url)
             .addHeader("User-Agent", USER_AGENT)
@@ -239,6 +243,7 @@ class GeminiWebClient(
         val messageId = "m_" + System.currentTimeMillis()
 
         client.newCall(request).execute().use { response ->
+            Log.d("GeminiWebClient", "StreamGenerate response code: ${response.code}")
             if (!response.isSuccessful) {
                 emit(
                     ChatMessage(
@@ -284,11 +289,13 @@ class GeminiWebClient(
                                 }
                             }
                         }
-                    } catch (_: Exception) {}
+                    } catch (e: Exception) {
+                        Log.e("GeminiWebClient", "Error parsing chunk: ${e.message}")
+                    }
                 }
             }
         }
-    }
+    }.flowOn(Dispatchers.IO)
 
     /**
      * Load recent conversation list from Gemini Web using MaZiqc RPC.

@@ -128,25 +128,43 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             val currentModel = _selectedModel.value
             val modelId = currentModel?.id ?: GeminiModel.MODEL_FLASH_3_8.id
 
-            client.sendMessageStream(
-                conversationId = convoId,
-                prompt = prompt,
-                modelId = modelId,
-                audioBytes = audioBytes
-            ).collect { responseMsg ->
-                val list = _messages.value.toMutableList()
-                val existingIndex = list.indexOfFirst { it.id == responseMsg.id }
-                if (existingIndex >= 0) {
-                    list[existingIndex] = responseMsg
-                } else {
-                    list.add(responseMsg)
+            try {
+                client.sendMessageStream(
+                    conversationId = convoId,
+                    prompt = prompt,
+                    modelId = modelId,
+                    audioBytes = audioBytes
+                ).collect { responseMsg ->
+                    val list = _messages.value.toMutableList()
+                    val existingIndex = list.indexOfFirst { it.id == responseMsg.id }
+                    if (existingIndex >= 0) {
+                        list[existingIndex] = responseMsg
+                    } else {
+                        list.add(responseMsg)
+                    }
+                    _messages.value = list
+                    if (_currentConversationId.value == null) {
+                        _currentConversationId.value = responseMsg.conversationId
+                    }
                 }
-                _messages.value = list
-                if (_currentConversationId.value == null) {
-                    _currentConversationId.value = responseMsg.conversationId
+
+                // Sync conversation list if new conversation was started
+                if (convoId == null && _currentConversationId.value != null) {
+                    val convoResult = client.getConversations()
+                    if (convoResult.isSuccess) {
+                        _conversations.value = convoResult.getOrThrow()
+                    }
                 }
+            } catch (e: Exception) {
+                _messages.value = _messages.value + ChatMessage(
+                    id = "err_" + System.currentTimeMillis(),
+                    conversationId = _currentConversationId.value ?: "new",
+                    role = MessageRole.MODEL,
+                    text = "Ошибка: ${e.localizedMessage ?: "Сбой соединения"}"
+                )
+            } finally {
+                _isLoading.value = false
             }
-            _isLoading.value = false
         }
     }
 
