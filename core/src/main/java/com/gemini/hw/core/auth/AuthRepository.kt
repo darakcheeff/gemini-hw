@@ -32,8 +32,8 @@ open class AuthRepository(private val context: Context? = null) {
 
     open fun hasValidSession(): Boolean {
         val psid = prefs?.getString(KEY_PSID, null)
-        val snlm0e = prefs?.getString(KEY_SNLM0E, null)
-        return !psid.isNullOrBlank() || !snlm0e.isNullOrBlank()
+        val rawCookies = prefs?.getString(KEY_COOKIES, null) ?: ""
+        return !psid.isNullOrBlank() || rawCookies.contains("__Secure-1PSID=")
     }
 
     open fun getCookieString(): String {

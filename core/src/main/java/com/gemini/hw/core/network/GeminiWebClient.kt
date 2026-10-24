@@ -45,14 +45,14 @@ class GeminiWebClient(
     suspend fun refreshTokensAndFetchModels(): Result<List<GeminiModel>> = withContext(Dispatchers.IO) {
         try {
             val cookieStr = authRepository.getCookieString()
+            if (cookieStr.isBlank() || !authRepository.hasValidSession()) {
+                return@withContext Result.failure(IllegalStateException("Требуется вход в аккаунт Google"))
+            }
             val requestBuilder = Request.Builder()
                 .url(GEMINI_APP_URL)
                 .addHeader("User-Agent", USER_AGENT)
                 .addHeader("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
-
-            if (cookieStr.isNotBlank()) {
-                requestBuilder.addHeader("Cookie", cookieStr)
-            }
+                .addHeader("Cookie", cookieStr)
 
             client.newCall(requestBuilder.build()).execute().use { response ->
                 if (!response.isSuccessful) {

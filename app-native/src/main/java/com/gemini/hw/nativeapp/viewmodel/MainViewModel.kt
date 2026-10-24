@@ -37,11 +37,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val _messages = MutableStateFlow<List<ChatMessage>>(emptyList())
     val messages: StateFlow<List<ChatMessage>> = _messages.asStateFlow()
 
-    private val _models = MutableStateFlow<List<GeminiModel>>(GeminiModel.CURRENT_MODELS)
+    private val _models = MutableStateFlow<List<GeminiModel>>(emptyList())
     val models: StateFlow<List<GeminiModel>> = _models.asStateFlow()
 
-    private val _selectedModel = MutableStateFlow<GeminiModel>(GeminiModel.MODEL_FLASH_3_8)
-    val selectedModel: StateFlow<GeminiModel> = _selectedModel.asStateFlow()
+    private val _selectedModel = MutableStateFlow<GeminiModel?>(null)
+    val selectedModel: StateFlow<GeminiModel?> = _selectedModel.asStateFlow()
 
     private val _thinkingLevel = MutableStateFlow("Авто")
     val thinkingLevel: StateFlow<String> = _thinkingLevel.asStateFlow()
@@ -61,9 +61,17 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun loadInitialData() {
         viewModelScope.launch {
+            if (!authRepository.hasValidSession()) {
+                _isLoggedIn.value = false
+                _models.value = emptyList()
+                _selectedModel.value = null
+                _isLoading.value = false
+                return@launch
+            }
+            _isLoggedIn.value = true
             _isLoading.value = true
 
-            // 1. Dynamic model list fetch from gemini.google.com (always runs)
+            // 1. Dynamic model list fetch from authenticated Google session
             val modelResult = client.refreshTokensAndFetchModels()
             if (modelResult.isSuccess) {
                 val fetchedModels = modelResult.getOrThrow()
@@ -73,13 +81,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 }
             }
 
-            // 2. Sync conversations if logged in
-            if (authRepository.hasValidSession()) {
-                val convoResult = client.getConversations()
-                if (convoResult.isSuccess) {
-                    _conversations.value = convoResult.getOrThrow()
-                }
+            // 2. Sync conversations
+            val convoResult = client.getConversations()
+            if (convoResult.isSuccess) {
+                _conversations.value = convoResult.getOrThrow()
             }
+
+            // 3. Sync Gems and Spark
+            gemsAndSparkRepository.syncAll(client)
 
             _isLoading.value = false
         }
@@ -122,11 +131,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             _isLoading.value = true
             val convoId = _currentConversationId.value
             val currentModel = _selectedModel.value
+            val modelId = currentModel?.id ?: GeminiModel.MODEL_FLASH_3_8.id
 
             client.sendMessageStream(
                 conversationId = convoId,
                 prompt = prompt,
-                modelId = currentModel.id,
+                modelId = modelId,
                 audioBytes = audioBytes
             ).collect { responseMsg ->
                 val list = _messages.value.toMutableList()

@@ -87,5 +87,7 @@ class MockAuthRepository : AuthRepository(null) {
 
     override fun getSnlm0eToken(): String? = token
 
+    override fun hasValidSession(): Boolean = true
+
     override fun getCookieString(): String = "__Secure-1PSID=test_cookie"
 }

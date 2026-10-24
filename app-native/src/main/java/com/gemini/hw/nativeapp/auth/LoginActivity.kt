@@ -234,6 +234,6 @@ class LoginActivity : ComponentActivity() {
     }
 
     companion object {
-        const val LOGIN_URL = "https://accounts.google.com/ServiceLogin?continue=https%3A%2F%2Fgemini.google.com%2Fapp&service=mail"
+        const val LOGIN_URL = "https://accounts.google.com/ServiceLogin?continue=https%3A%2F%2Fgemini.google.com%2Fapp"
     }
 }

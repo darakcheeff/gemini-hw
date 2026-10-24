@@ -22,7 +22,7 @@ import com.gemini.hw.core.model.GeminiModel
 @Composable
 fun ModelSelectorDropdown(
     models: List<GeminiModel>,
-    selectedModel: GeminiModel,
+    selectedModel: GeminiModel?,
     onModelSelected: (GeminiModel) -> Unit,
     thinkingLevel: String = "Авто",
     onThinkingLevelSelected: (String) -> Unit = {}
@@ -43,7 +43,7 @@ fun ModelSelectorDropdown(
             verticalAlignment = Alignment.CenterVertically
         ) {
             Text(
-                text = selectedModel.displayName,
+                text = selectedModel?.displayName ?: "Gemini",
                 style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold),
                 color = MaterialTheme.colorScheme.onSurface
             )
@@ -69,7 +69,7 @@ fun ModelSelectorDropdown(
         ) {
             if (!showThinkingMenu) {
                 models.forEach { model ->
-                    val isSelected = model.id == selectedModel.id
+                    val isSelected = model.id == selectedModel?.id
                     DropdownMenuItem(
                         text = {
                             Column(modifier = Modifier.padding(vertical = 4.dp)) {
