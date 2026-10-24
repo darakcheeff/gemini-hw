@@ -244,7 +244,7 @@ class GeminiWebClient(
                     ChatMessage(
                         id = messageId,
                         conversationId = currentConvoId,
-                        role = MessageRole.ASSISTANT,
+                        role = MessageRole.MODEL,
                         text = "Ошибка связи с сервером (${response.code}). Проверьте подключение или выполните повторный вход."
                     )
                 )
@@ -277,7 +277,7 @@ class GeminiWebClient(
                                         ChatMessage(
                                             id = messageId,
                                             conversationId = currentConvoId,
-                                            role = MessageRole.ASSISTANT,
+                                            role = MessageRole.MODEL,
                                             text = fullTextBuilder.toString()
                                         )
                                     )
