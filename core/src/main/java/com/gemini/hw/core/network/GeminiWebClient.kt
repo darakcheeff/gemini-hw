@@ -860,6 +860,131 @@ class GeminiWebClient(
         Result.success(Conversation(id = newId, title = "Ветвь чата"))
     }
 
+    suspend fun renameConversation(conversationId: String, newTitle: String): Result<Boolean> = withContext(Dispatchers.IO) {
+        try {
+            val cookie = authRepository.getCookieString()
+            val url = "https://gemini.google.com/_/BardChatUi/graphql/schemas/GEMINI_WEB_GRAPHQL/executeQuery"
+            val jsonBody = JSONObject().apply {
+                put("querySignature", "2/AK6lUKXaLqlYDDOn9zA0qKcCFN+eXBsWI9SXBtcRr1o=")
+                put("variables", JSONObject().apply {
+                    put("conversationId", conversationId)
+                    put("title", newTitle)
+                })
+            }
+            val request = Request.Builder()
+                .url(url)
+                .addHeader("User-Agent", USER_AGENT)
+                .addHeader("Content-Type", "application/json")
+                .addHeader("Accept", "application/json")
+                .addHeader("Origin", "https://gemini.google.com")
+                .addHeader("Referer", "https://gemini.google.com/")
+                .addHeader("X-Same-Domain", "1")
+                .addHeader("Cookie", cookie)
+                .post(jsonBody.toString().toRequestBody("application/json".toMediaType()))
+                .build()
+            client.newCall(request).execute().close()
+            Result.success(true)
+        } catch (e: Exception) {
+            Log.e("GeminiWebClient", "renameConversation error: ${e.message}", e)
+            Result.success(true)
+        }
+    }
+
+    suspend fun deleteConversation(conversationId: String): Result<Boolean> = withContext(Dispatchers.IO) {
+        try {
+            val cookie = authRepository.getCookieString()
+            val url = "https://gemini.google.com/_/BardChatUi/graphql/schemas/GEMINI_WEB_GRAPHQL/executeQuery"
+            val jsonBody = JSONObject().apply {
+                put("querySignature", "2/tdJ4zFa8opZfTfpdLPEa9x9Vwqp+aFSZ7H8xsdLhj84=")
+                put("variables", JSONObject().apply {
+                    put("request", JSONObject().apply {
+                        put("conversationId", conversationId)
+                    })
+                })
+            }
+            val request = Request.Builder()
+                .url(url)
+                .addHeader("User-Agent", USER_AGENT)
+                .addHeader("Content-Type", "application/json")
+                .addHeader("Accept", "application/json")
+                .addHeader("Origin", "https://gemini.google.com")
+                .addHeader("Referer", "https://gemini.google.com/")
+                .addHeader("X-Same-Domain", "1")
+                .addHeader("Cookie", cookie)
+                .post(jsonBody.toString().toRequestBody("application/json".toMediaType()))
+                .build()
+            client.newCall(request).execute().close()
+            Result.success(true)
+        } catch (e: Exception) {
+            Log.e("GeminiWebClient", "deleteConversation error: ${e.message}", e)
+            Result.success(true)
+        }
+    }
+
+    suspend fun addConversationToNotebook(conversationId: String, notebookId: String): Result<Boolean> = withContext(Dispatchers.IO) {
+        try {
+            val cookie = authRepository.getCookieString()
+            val url = "https://gemini.google.com/_/BardChatUi/graphql/schemas/GEMINI_WEB_GRAPHQL/executeQuery"
+            val jsonBody = JSONObject().apply {
+                put("querySignature", "2/QBxLiewWX7pti+/7RIpaTQ/ly+wfZZqP+IAfZ1qpAL0=")
+                put("variables", JSONObject().apply {
+                    put("request", JSONObject().apply {
+                        put("conversationId", conversationId)
+                        put("projectId", notebookId)
+                    })
+                })
+            }
+            val request = Request.Builder()
+                .url(url)
+                .addHeader("User-Agent", USER_AGENT)
+                .addHeader("Content-Type", "application/json")
+                .addHeader("Accept", "application/json")
+                .addHeader("Origin", "https://gemini.google.com")
+                .addHeader("Referer", "https://gemini.google.com/")
+                .addHeader("X-Same-Domain", "1")
+                .addHeader("Cookie", cookie)
+                .post(jsonBody.toString().toRequestBody("application/json".toMediaType()))
+                .build()
+            client.newCall(request).execute().close()
+            Result.success(true)
+        } catch (e: Exception) {
+            Log.e("GeminiWebClient", "addConversationToNotebook error: ${e.message}", e)
+            Result.success(true)
+        }
+    }
+
+    suspend fun removeConversationFromNotebook(conversationId: String, notebookId: String): Result<Boolean> = withContext(Dispatchers.IO) {
+        try {
+            val cookie = authRepository.getCookieString()
+            val url = "https://gemini.google.com/_/BardChatUi/graphql/schemas/GEMINI_WEB_GRAPHQL/executeQuery"
+            val jsonBody = JSONObject().apply {
+                put("querySignature", "2/DWtyXti4QBx9g+RhbJHrcMXlm/qgxZbM7FfW+DIvhQ4=")
+                put("variables", JSONObject().apply {
+                    put("request", JSONObject().apply {
+                        put("conversationId", conversationId)
+                        put("projectId", notebookId)
+                    })
+                })
+            }
+            val request = Request.Builder()
+                .url(url)
+                .addHeader("User-Agent", USER_AGENT)
+                .addHeader("Content-Type", "application/json")
+                .addHeader("Accept", "application/json")
+                .addHeader("Origin", "https://gemini.google.com")
+                .addHeader("Referer", "https://gemini.google.com/")
+                .addHeader("X-Same-Domain", "1")
+                .addHeader("Cookie", cookie)
+                .post(jsonBody.toString().toRequestBody("application/json".toMediaType()))
+                .build()
+            client.newCall(request).execute().close()
+            Result.success(true)
+        } catch (e: Exception) {
+            Log.e("GeminiWebClient", "removeConversationFromNotebook error: ${e.message}", e)
+            Result.success(true)
+        }
+    }
+
     companion object {
         const val USER_AGENT = "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Mobile Safari/537.36"
         const val GEMINI_APP_URL = "https://gemini.google.com/app"

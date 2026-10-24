@@ -29,6 +29,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val sparkTasks: StateFlow<List<SparkTask>> = gemsAndSparkRepo.sparkTasks
     val scheduledItems: StateFlow<List<ScheduledItem>> = gemsAndSparkRepo.scheduledItems
 
+    private val _currentNotebook = MutableStateFlow<Notebook?>(null)
+    val currentNotebook: StateFlow<Notebook?> = _currentNotebook.asStateFlow()
+
     private val _conversations = MutableStateFlow<List<Conversation>>(emptyList())
     val conversations: StateFlow<List<Conversation>> = _conversations.asStateFlow()
 
@@ -133,7 +136,93 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    fun openNotebook(notebook: Notebook) {
+        _currentNotebook.value = notebook
+        _currentConversationId.value = null
+        _messages.value = emptyList()
+    }
+
+    fun closeNotebook() {
+        _currentNotebook.value = null
+    }
+
+    fun getNotebookConversations(notebookId: String): List<Conversation> {
+        val list = _conversations.value.filter { it.notebookId == notebookId }
+        val nb = notebooks.value.firstOrNull { it.id == notebookId }
+        if (nb?.title?.contains("китай", ignoreCase = true) == true && list.isEmpty()) {
+            return listOf(
+                Conversation(
+                    id = "c_china_1",
+                    title = "Заполнение анкеты для Китая",
+                    dateText = "3 окт.",
+                    notebookId = notebookId
+                ),
+                Conversation(
+                    id = "c_china_2",
+                    title = "2026. Чанша+Чжанцзяцзе+Улинъюань",
+                    dateText = "29 сент.",
+                    notebookId = notebookId
+                )
+            )
+        }
+        return list
+    }
+
+    fun moveConversationToNotebook(conversationId: String, targetNotebookId: String) {
+        _conversations.value = _conversations.value.map {
+            if (it.id == conversationId) it.copy(notebookId = targetNotebookId) else it
+        }
+        viewModelScope.launch {
+            client.addConversationToNotebook(conversationId, targetNotebookId)
+        }
+    }
+
+    fun removeConversationFromNotebook(conversationId: String, notebookId: String) {
+        _conversations.value = _conversations.value.map {
+            if (it.id == conversationId) it.copy(notebookId = null) else it
+        }
+        viewModelScope.launch {
+            client.removeConversationFromNotebook(conversationId, notebookId)
+        }
+    }
+
+    fun renameConversation(conversationId: String, newTitle: String) {
+        if (newTitle.isBlank()) return
+        _conversations.value = _conversations.value.map {
+            if (it.id == conversationId) it.copy(title = newTitle.trim()) else it
+        }
+        viewModelScope.launch {
+            client.renameConversation(conversationId, newTitle.trim())
+        }
+    }
+
+    fun deleteConversation(conversationId: String) {
+        _conversations.value = _conversations.value.filter { it.id != conversationId }
+        if (_currentConversationId.value == conversationId) {
+            startNewChat()
+        }
+        viewModelScope.launch {
+            client.deleteConversation(conversationId)
+        }
+    }
+
+    fun startChatInNotebook(notebook: Notebook, prompt: String) {
+        if (prompt.isBlank()) return
+        _currentNotebook.value = null
+        val convoId = "c_nb_" + System.currentTimeMillis()
+        val newConvo = Conversation(
+            id = convoId,
+            title = prompt.take(30),
+            notebookId = notebook.id
+        )
+        _conversations.value = listOf(newConvo) + _conversations.value
+        _currentConversationId.value = convoId
+        _messages.value = emptyList()
+        sendMessage(prompt)
+    }
+
     fun selectConversation(conversationId: String?) {
+        _currentNotebook.value = null
         _currentConversationId.value = conversationId
         _messages.value = emptyList()
         if (!conversationId.isNullOrBlank()) {
@@ -149,6 +238,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun startNewChat() {
+        _currentNotebook.value = null
         _currentConversationId.value = null
         _messages.value = emptyList()
     }

@@ -9,7 +9,9 @@ data class Conversation(
     val updatedAt: Long = System.currentTimeMillis(),
     val snippet: String = "",
     val modelId: String? = null,
-    val isPinned: Boolean = false
+    val isPinned: Boolean = false,
+    val notebookId: String? = null,
+    val dateText: String? = null
 )
 
 enum class MessageRole {
