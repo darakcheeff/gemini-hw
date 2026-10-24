@@ -36,7 +36,7 @@ class GeminiWebClientTest {
 
         val htmlWithNewModels = """
             <script>window.WIZ_global_data = {
-                "45702952":"[[\"gemini-2.0-flash\",\"gemini-2.5-flash\",\"gemini-3-flash-preview\"]]\"
+                "45702952":"[[\"gemini-2.0-flash\",\"gemini-2.5-flash\",\"gemini-3-flash-preview\"]]"
             };</script>
             <div>Models: "gemini-1.5-pro", "gemini-2.0-flash-thinking"</div>
         """.trimIndent()

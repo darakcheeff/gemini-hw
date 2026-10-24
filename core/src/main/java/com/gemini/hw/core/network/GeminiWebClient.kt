@@ -95,14 +95,13 @@ class GeminiWebClient(
     internal fun parseModelsFromHtml(html: String): List<GeminiModel> {
         val discoveredIds = linkedSetOf<String>()
 
+        // 1. Inspect window.WIZ_global_data and flags
         try {
-            // 1. Inspect window.WIZ_global_data
             val wizMatcher = PATTERN_WIZ_DATA.matcher(html)
             if (wizMatcher.find()) {
                 val rawWiz = wizMatcher.group(1) ?: "{}"
                 val wizJson = JSONObject(rawWiz)
 
-                // Scan all keys in WIZ_global_data for model arrays or strings
                 val keys = wizJson.keys()
                 while (keys.hasNext()) {
                     val key = keys.next()
@@ -112,7 +111,6 @@ class GeminiWebClient(
                     }
                 }
 
-                // Check TSDtV flags specifically
                 val flagsStr = wizJson.optString("TSDtV", "")
                 if (flagsStr.isNotBlank()) {
                     val flagsObj = JSONObject(flagsStr)
@@ -130,7 +128,7 @@ class GeminiWebClient(
             }
         } catch (_: Exception) {}
 
-        // 2. Regex fallback scan over entire HTML for any gemini model references
+        // 2. Comprehensive regex scan over entire HTML / scripts for any gemini model references
         try {
             val matcher = PATTERN_MODEL_REGEX.matcher(html)
             while (matcher.find()) {
@@ -145,9 +143,8 @@ class GeminiWebClient(
             return GeminiModel.FALLBACK_MODELS
         }
 
-        // Convert discovered IDs into GeminiModel representations
         val models = discoveredIds
-            .filter { !it.contains("uiserver") && !it.contains("panel") }
+            .filter { !it.contains("uiserver") && !it.contains("panel") && !it.contains("apps-") }
             .map { GeminiModel.createDynamic(it) }
             .sortedWith(compareByDescending<GeminiModel> { it.isDefault }
                 .thenBy { it.displayName })
@@ -402,7 +399,7 @@ class GeminiWebClient(
         private val PATTERN_FDRFJE = Pattern.compile("\"FdrFJe\":\"([^\"]+)\"")
         private val PATTERN_CFB2H = Pattern.compile("\"cfb2h\":\"([^\"]+)\"")
         private val PATTERN_WIZ_DATA = Pattern.compile("window\\.WIZ_global_data\\s*=\\s*(\\{.*?\\});", Pattern.DOTALL)
-        private val PATTERN_MODEL_REGEX = Pattern.compile("\"(gemini-[a-zA-Z0-9\\.\\-_]+)\"")
+        private val PATTERN_MODEL_REGEX = Pattern.compile("(?:\"|'|\\\\\"|\\b)(gemini-(?:[0-9]\\.[0-9]|[0-9])[a-zA-Z0-9\\.\\-_]*)(?:\"|'|\\\\\"|\\b)")
     }
 }
 
