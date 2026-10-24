@@ -314,6 +314,8 @@ class GeminiWebClient(
             val postData = "f.req=" + URLEncoder.encode(fReq, "UTF-8") + "&at=" + URLEncoder.encode(snlm0e, "UTF-8")
             val url = "$BATCH_EXECUTE_URL?rpcids=MaZiqc&f.sid=$fsid&bl=$bl&hl=ru&_reqid=${nextReqId()}&rt=c"
 
+            Log.d("GeminiWebClient", "getConversations calling URL: $url")
+
             val request = Request.Builder()
                 .url(url)
                 .addHeader("User-Agent", USER_AGENT)
@@ -326,6 +328,7 @@ class GeminiWebClient(
                 .build()
 
             client.newCall(request).execute().use { response ->
+                Log.d("GeminiWebClient", "getConversations responseCode: ${response.code}")
                 if (!response.isSuccessful) {
                     return@withContext Result.failure(Exception("HTTP ${response.code}"))
                 }
@@ -334,32 +337,175 @@ class GeminiWebClient(
                 Result.success(convos)
             }
         } catch (e: Exception) {
+            Log.e("GeminiWebClient", "getConversations failed: ${e.message}", e)
             Result.failure(e)
         }
     }
 
     internal fun parseConversationsFromBody(body: String): List<Conversation> {
         val result = mutableListOf<Conversation>()
+        val seenIds = mutableSetOf<String>()
+
+        fun inspectArray(arr: JSONArray) {
+            for (i in 0 until arr.length()) {
+                val sub = arr.optJSONArray(i)
+                if (sub != null) {
+                    val id = sub.optString(0, "")
+                    val title = sub.optString(1, "")
+                    if (id.startsWith("c_") || (id.length in 8..64 && !id.contains(" ") && title.isNotBlank())) {
+                        val finalId = if (id.startsWith("c_")) id else "c_$id"
+                        if (finalId !in seenIds) {
+                            seenIds.add(finalId)
+                            result.add(Conversation(id = finalId, title = title.ifBlank { "Новый чат" }))
+                        }
+                    } else {
+                        inspectArray(sub)
+                    }
+                }
+            }
+        }
+
         try {
+            Log.d("GeminiWebClient", "parseConversationsFromBody body len=${body.length}")
             for (line in body.split("\n")) {
                 if (line.contains("MaZiqc") && line.contains("wrb.fr")) {
-                    val array = JSONArray(line)
-                    val innerStr = array.getJSONArray(0).optString(2, "")
-                    if (innerStr.isNotBlank()) {
-                        val innerData = JSONArray(innerStr)
-                        val convosArr = innerData.optJSONArray(0) ?: continue
-                        for (i in 0 until convosArr.length()) {
-                            val c = convosArr.optJSONArray(i) ?: continue
-                            val id = c.optString(0, "")
-                            val title = c.optString(1, "")
-                            if (id.isNotBlank()) {
-                                result.add(Conversation(id = id, title = title.ifBlank { "Новый чат" }))
+                    val start = line.indexOf("[")
+                    if (start >= 0) {
+                        val chunkArray = JSONArray(line.substring(start))
+                        for (j in 0 until chunkArray.length()) {
+                            val chunk = chunkArray.optJSONArray(j) ?: continue
+                            if (chunk.optString(0) == "wrb.fr" && chunk.optString(1) == "MaZiqc") {
+                                val innerStr = chunk.optString(2, "")
+                                if (innerStr.isNotBlank() && innerStr != "null") {
+                                    Log.d("GeminiWebClient", "MaZiqc innerStr: ${innerStr.take(300)}")
+                                    val innerData = JSONArray(innerStr)
+                                    inspectArray(innerData)
+                                }
                             }
                         }
                     }
                 }
             }
-        } catch (_: Exception) {}
+        } catch (e: Exception) {
+            Log.e("GeminiWebClient", "parseConversationsFromBody error: ${e.message}", e)
+        }
+        Log.d("GeminiWebClient", "parseConversationsFromBody parsed ${result.size} convos")
+        return result
+    }
+
+    /**
+     * Load message history for a specific conversation using hNvQHb RPC.
+     */
+    suspend fun getConversationMessages(conversationId: String): Result<List<ChatMessage>> = withContext(Dispatchers.IO) {
+        try {
+            if (cachedSnlm0e.isNullOrBlank()) {
+                refreshTokensAndFetchModels()
+            }
+            val snlm0e = cachedSnlm0e ?: authRepository.getSnlm0eToken() ?: ""
+            val cookie = authRepository.getCookieString()
+            val fsid = cachedFdrFJe ?: ""
+            val bl = cachedBuildLabel ?: "boq_gemini-web-uiserver_20261023.01_p0"
+
+            val cleanId = conversationId.removePrefix("c_")
+            val innerPayload = JSONArray().apply {
+                put(cleanId)
+                put(50)
+            }
+            val fReq = JSONArray().apply {
+                put(JSONArray().apply {
+                    put("hNvQHb")
+                    put(innerPayload.toString())
+                    put(null)
+                    put("generic")
+                })
+            }
+            val postData = "f.req=" + URLEncoder.encode(fReq.toString(), "UTF-8") + "&at=" + URLEncoder.encode(snlm0e, "UTF-8")
+            val url = "$BATCH_EXECUTE_URL?rpcids=hNvQHb&f.sid=$fsid&bl=$bl&hl=ru&_reqid=${nextReqId()}&rt=c"
+
+            Log.d("GeminiWebClient", "getConversationMessages calling URL: $url for $conversationId")
+
+            val request = Request.Builder()
+                .url(url)
+                .addHeader("User-Agent", USER_AGENT)
+                .addHeader("Content-Type", "application/x-www-form-urlencoded;charset=UTF-8")
+                .addHeader("Origin", "https://gemini.google.com")
+                .addHeader("Referer", "https://gemini.google.com/")
+                .addHeader("X-Same-Domain", "1")
+                .addHeader("Cookie", cookie)
+                .post(postData.toRequestBody("application/x-www-form-urlencoded;charset=UTF-8".toMediaType()))
+                .build()
+
+            client.newCall(request).execute().use { response ->
+                Log.d("GeminiWebClient", "getConversationMessages responseCode: ${response.code}")
+                if (!response.isSuccessful) {
+                    return@withContext Result.failure(Exception("HTTP ${response.code}"))
+                }
+                val body = response.body?.string() ?: ""
+                val messages = parseMessagesFromBody(body, conversationId)
+                Result.success(messages)
+            }
+        } catch (e: Exception) {
+            Log.e("GeminiWebClient", "getConversationMessages failed: ${e.message}", e)
+            Result.failure(e)
+        }
+    }
+
+    internal fun parseMessagesFromBody(body: String, conversationId: String): List<ChatMessage> {
+        val result = mutableListOf<ChatMessage>()
+        try {
+            for (line in body.split("\n")) {
+                if (line.contains("hNvQHb") && line.contains("wrb.fr")) {
+                    val start = line.indexOf("[")
+                    if (start >= 0) {
+                        val chunkArray = JSONArray(line.substring(start))
+                        for (j in 0 until chunkArray.length()) {
+                            val chunk = chunkArray.optJSONArray(j) ?: continue
+                            if (chunk.optString(0) == "wrb.fr" && chunk.optString(1) == "hNvQHb") {
+                                val innerStr = chunk.optString(2, "")
+                                if (innerStr.isNotBlank() && innerStr != "null") {
+                                    val innerData = JSONArray(innerStr)
+                                    val turns = innerData.optJSONArray(0) ?: innerData
+                                    for (t in 0 until turns.length()) {
+                                        val turn = turns.optJSONArray(t) ?: continue
+                                        val turnId = turn.optString(0, "turn_$t")
+                                        val userArr = turn.optJSONArray(1)
+                                        val userText = userArr?.optString(0, "") ?: ""
+                                        if (userText.isNotBlank()) {
+                                            result.add(
+                                                ChatMessage(
+                                                    id = "u_$turnId",
+                                                    conversationId = conversationId,
+                                                    role = MessageRole.USER,
+                                                    text = userText
+                                                )
+                                            )
+                                        }
+                                        val modelCandidates = turn.optJSONArray(2)
+                                        if (modelCandidates != null && modelCandidates.length() > 0) {
+                                            val firstCand = modelCandidates.optJSONArray(0)
+                                            val parts = firstCand?.optJSONArray(1)
+                                            val modelText = parts?.optString(0, "") ?: ""
+                                            if (modelText.isNotBlank()) {
+                                                result.add(
+                                                    ChatMessage(
+                                                        id = "m_$turnId",
+                                                        conversationId = conversationId,
+                                                        role = MessageRole.MODEL,
+                                                        text = modelText
+                                                    )
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            Log.e("GeminiWebClient", "parseMessagesFromBody error: ${e.message}", e)
+        }
         return result
     }
 

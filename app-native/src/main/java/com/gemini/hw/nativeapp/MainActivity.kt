@@ -92,6 +92,12 @@ fun MainScreen(viewModel: MainViewModel) {
         }
     }
 
+    LaunchedEffect(drawerState.isOpen) {
+        if (drawerState.isOpen && isLoggedIn) {
+            viewModel.refreshConversations()
+        }
+    }
+
     val permissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestPermission()
     ) { isGranted ->

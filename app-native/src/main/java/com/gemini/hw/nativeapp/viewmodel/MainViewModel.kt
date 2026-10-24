@@ -80,18 +80,34 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             }
 
             // 2. Sync conversations
+            refreshConversations()
+
+            _isLoading.value = false
+        }
+    }
+
+    fun refreshConversations() {
+        viewModelScope.launch {
             val convoResult = client.getConversations()
             if (convoResult.isSuccess) {
                 _conversations.value = convoResult.getOrThrow()
             }
-
-            _isLoading.value = false
         }
     }
 
     fun selectConversation(conversationId: String?) {
         _currentConversationId.value = conversationId
         _messages.value = emptyList()
+        if (!conversationId.isNullOrBlank()) {
+            viewModelScope.launch {
+                _isLoading.value = true
+                val msgResult = client.getConversationMessages(conversationId)
+                if (msgResult.isSuccess) {
+                    _messages.value = msgResult.getOrThrow()
+                }
+                _isLoading.value = false
+            }
+        }
     }
 
     fun startNewChat() {
