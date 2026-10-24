@@ -734,15 +734,18 @@ class GeminiWebClient(
         val list = mutableListOf<Notebook>()
         val seenIds = mutableSetOf<String>()
         try {
-            for (line in body.split("\n")) {
-                val trimmed = line.trim()
-                if (trimmed.startsWith(")]}'") || trimmed.isEmpty()) continue
-                val root = try {
-                    if (trimmed.startsWith("{")) JSONObject(trimmed)
-                    else if (trimmed.startsWith("[")) JSONArray(trimmed).optJSONObject(0)
-                    else null
-                } catch (e: Exception) { null } ?: continue
+            val clean = body.trim().removePrefix(")]}'").trim()
+            val roots = mutableListOf<JSONObject>()
+            if (clean.startsWith("[")) {
+                val arr = JSONArray(clean)
+                for (i in 0 until arr.length()) {
+                    arr.optJSONObject(i)?.let { roots.add(it) }
+                }
+            } else if (clean.startsWith("{")) {
+                roots.add(JSONObject(clean))
+            }
 
+            for (root in roots) {
                 val data = root.optJSONObject("data")
                 val viewer = data?.optJSONObject("viewer")
                 val rpcs = viewer?.optJSONObject("rpcs")
@@ -755,7 +758,7 @@ class GeminiWebClient(
                         val nb = nbArray.optJSONObject(i) ?: continue
                         val id = nb.optString("id", "")
                         val title = nb.optString("displayName", "").trim()
-                        val count = nb.optInt("sourceCount", 0)
+                        val count = nb.optDouble("sourceCount", 0.0).toInt()
                         if (id.isNotBlank() && title.isNotBlank() && id !in seenIds) {
                             seenIds.add(id)
                             list.add(Notebook(id = id, title = title, content = if (count > 0) "Источников: $count" else ""))
