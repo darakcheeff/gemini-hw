@@ -76,10 +76,12 @@ fun MainScreen(viewModel: MainViewModel) {
     val activeCanvas by viewModel.activeCanvas.collectAsState()
 
     val gems by viewModel.gems.collectAsState()
+    val notebooks by viewModel.notebooks.collectAsState()
     val sparkTasks by viewModel.sparkTasks.collectAsState()
     val scheduledItems by viewModel.scheduledItems.collectAsState()
 
     var showGemsDialog by remember { mutableStateOf(false) }
+    var showNotebooksDialog by remember { mutableStateOf(false) }
     var showSparkDialog by remember { mutableStateOf(false) }
     var showScheduledDialog by remember { mutableStateOf(false) }
 
@@ -201,12 +203,22 @@ fun MainScreen(viewModel: MainViewModel) {
                 HorizontalDivider()
 
                 NavigationDrawerItem(
-                    label = { Text("Блокноты (Gems)") },
-                    icon = { Icon(Icons.AutoMirrored.Filled.MenuBook, contentDescription = null) },
+                    label = { Text("Боты (Gems)") },
+                    icon = { Icon(Icons.Default.AutoAwesome, contentDescription = null) },
                     selected = false,
                     onClick = {
                         coroutineScope.launch { drawerState.close() }
                         showGemsDialog = true
+                    }
+                )
+
+                NavigationDrawerItem(
+                    label = { Text("Блокноты") },
+                    icon = { Icon(Icons.AutoMirrored.Filled.MenuBook, contentDescription = null) },
+                    selected = false,
+                    onClick = {
+                        coroutineScope.launch { drawerState.close() }
+                        showNotebooksDialog = true
                     }
                 )
 
@@ -511,9 +523,22 @@ fun MainScreen(viewModel: MainViewModel) {
         GemsDialog(
             gems = gems,
             onSelectGem = { gem ->
-                viewModel.sendMessage("Активируй блокнот: ${gem.name}. Инструкции: ${gem.systemInstructions}")
+                viewModel.selectGem(gem)
             },
             onDismiss = { showGemsDialog = false }
+        )
+    }
+
+    if (showNotebooksDialog) {
+        NotebooksDialog(
+            notebooks = notebooks,
+            onAddNotebook = { title, content -> viewModel.addNotebook(title, content) },
+            onRemoveNotebook = { id -> viewModel.removeNotebook(id) },
+            onSelectNotebook = { nb ->
+                viewModel.startNewChat()
+                viewModel.sendMessage("Используй материалы из блокнота '${nb.title}':\n${nb.content}\nЧто ты можешь предложить на основе этих данных?")
+            },
+            onDismiss = { showNotebooksDialog = false }
         )
     }
 

@@ -67,6 +67,15 @@ data class Gem(
 )
 
 @Serializable
+data class Notebook(
+    val id: String,
+    val title: String,
+    val content: String = "",
+    val sources: List<String> = emptyList(),
+    val updatedAt: Long = System.currentTimeMillis()
+)
+
+@Serializable
 data class ScheduledItem(
     val id: String,
     val title: String,

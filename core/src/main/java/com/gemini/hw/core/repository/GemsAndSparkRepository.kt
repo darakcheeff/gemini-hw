@@ -1,6 +1,7 @@
 package com.gemini.hw.core.repository
 
 import com.gemini.hw.core.model.Gem
+import com.gemini.hw.core.model.Notebook
 import com.gemini.hw.core.model.ScheduledItem
 import com.gemini.hw.core.model.SparkStep
 import com.gemini.hw.core.model.SparkTask
@@ -37,6 +38,32 @@ class GemsAndSparkRepository {
         )
     )
     val gems: StateFlow<List<Gem>> = _gems.asStateFlow()
+
+    private val _notebooks = MutableStateFlow<List<Notebook>>(emptyList())
+    val notebooks: StateFlow<List<Notebook>> = _notebooks.asStateFlow()
+
+    fun setGems(list: List<Gem>) {
+        if (list.isNotEmpty()) {
+            _gems.value = list
+        }
+    }
+
+    fun setNotebooks(list: List<Notebook>) {
+        _notebooks.value = list
+    }
+
+    fun addNotebook(title: String, content: String = "") {
+        val nb = Notebook(
+            id = "nb_" + System.currentTimeMillis(),
+            title = title,
+            content = content
+        )
+        _notebooks.value = listOf(nb) + _notebooks.value
+    }
+
+    fun removeNotebook(id: String) {
+        _notebooks.value = _notebooks.value.filter { it.id != id }
+    }
 
     private val _scheduledItems = MutableStateFlow<List<ScheduledItem>>(emptyList())
     val scheduledItems: StateFlow<List<ScheduledItem>> = _scheduledItems.asStateFlow()

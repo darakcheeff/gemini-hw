@@ -25,6 +25,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val isLoggedIn: StateFlow<Boolean> = authRepository.isLoggedIn
 
     val gems: StateFlow<List<Gem>> = gemsAndSparkRepo.gems
+    val notebooks: StateFlow<List<Notebook>> = gemsAndSparkRepo.notebooks
     val sparkTasks: StateFlow<List<SparkTask>> = gemsAndSparkRepo.sparkTasks
     val scheduledItems: StateFlow<List<ScheduledItem>> = gemsAndSparkRepo.scheduledItems
 
@@ -82,8 +83,33 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             // 2. Sync conversations
             refreshConversations()
 
+            // 3. Sync Gems (bots)
+            refreshGems()
+
             _isLoading.value = false
         }
+    }
+
+    fun refreshGems() {
+        viewModelScope.launch {
+            val res = client.getGems()
+            if (res.isSuccess) {
+                gemsAndSparkRepo.setGems(res.getOrThrow())
+            }
+        }
+    }
+
+    fun addNotebook(title: String, content: String = "") {
+        gemsAndSparkRepo.addNotebook(title, content)
+    }
+
+    fun removeNotebook(id: String) {
+        gemsAndSparkRepo.removeNotebook(id)
+    }
+
+    fun selectGem(gem: Gem) {
+        startNewChat()
+        sendMessage("Ты действуешь как бот '${gem.name}'. ${gem.description}. Начнем диалог.")
     }
 
     fun refreshConversations() {

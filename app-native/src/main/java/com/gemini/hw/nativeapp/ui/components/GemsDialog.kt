@@ -29,7 +29,7 @@ fun GemsDialog(
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Icon(Icons.Default.AutoAwesome, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
                 Spacer(modifier = Modifier.width(8.dp))
-                Text("Блокноты (Gems)")
+                Text("Боты (Gems)")
             }
         },
         text = {

@@ -7,7 +7,8 @@
     <string name="send">Отправить</string>
     <string name="record_voice">Голосовой ввод</string>
     <string name="models_header">Выбор модели</string>
-    <string name="gems_title">Блокноты (Gems)</string>
+    <string name="gems_title">Боты (Gems)</string>
+    <string name="notebooks_title">Блокноты</string>
     <string name="scheduled_title">Запланированное</string>
     <string name="spark_title">Задачи (Spark)</string>
     <string name="branch_action">Создать ветвь в новом чате</string>

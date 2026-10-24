@@ -510,6 +510,106 @@ class GeminiWebClient(
     }
 
     /**
+     * Load Gems (bots) from Gemini Web using CNgdBe RPC.
+     */
+    suspend fun getGems(): Result<List<Gem>> = withContext(Dispatchers.IO) {
+        try {
+            if (cachedSnlm0e.isNullOrBlank()) {
+                refreshTokensAndFetchModels()
+            }
+            val snlm0e = cachedSnlm0e ?: authRepository.getSnlm0eToken() ?: ""
+            val cookie = authRepository.getCookieString()
+            val fsid = cachedFdrFJe ?: ""
+            val bl = cachedBuildLabel ?: "boq_gemini-web-uiserver_20261023.01_p0"
+
+            val fReq = "[[[\"CNgdBe\",\"[]\",null,\"generic\"]]]"
+            val postData = "f.req=" + URLEncoder.encode(fReq, "UTF-8") + "&at=" + URLEncoder.encode(snlm0e, "UTF-8")
+            val url = "$BATCH_EXECUTE_URL?rpcids=CNgdBe&f.sid=$fsid&bl=$bl&hl=ru&_reqid=${nextReqId()}&rt=c"
+
+            Log.d("GeminiWebClient", "getGems calling URL: $url")
+
+            val request = Request.Builder()
+                .url(url)
+                .addHeader("User-Agent", USER_AGENT)
+                .addHeader("Content-Type", "application/x-www-form-urlencoded;charset=UTF-8")
+                .addHeader("Origin", "https://gemini.google.com")
+                .addHeader("Referer", "https://gemini.google.com/")
+                .addHeader("X-Same-Domain", "1")
+                .addHeader("Cookie", cookie)
+                .post(postData.toRequestBody("application/x-www-form-urlencoded;charset=UTF-8".toMediaType()))
+                .build()
+
+            client.newCall(request).execute().use { response ->
+                Log.d("GeminiWebClient", "getGems responseCode: ${response.code}")
+                if (!response.isSuccessful) {
+                    return@withContext Result.failure(Exception("HTTP ${response.code}"))
+                }
+                val body = response.body?.string() ?: ""
+                val gems = parseGemsFromBody(body)
+                Result.success(gems)
+            }
+        } catch (e: Exception) {
+            Log.e("GeminiWebClient", "getGems failed: ${e.message}", e)
+            Result.failure(e)
+        }
+    }
+
+    internal fun parseGemsFromBody(body: String): List<Gem> {
+        val result = mutableListOf<Gem>()
+        val seenIds = mutableSetOf<String>()
+
+        fun inspectArray(arr: JSONArray) {
+            for (i in 0 until arr.length()) {
+                val sub = arr.optJSONArray(i)
+                if (sub != null) {
+                    val id = sub.optString(0, "")
+                    val name = sub.optString(1, "")
+                    val desc = sub.optString(2, "")
+                    if (id.isNotBlank() && name.isNotBlank() && !id.startsWith("c_") && !name.startsWith("c_")) {
+                        if (id !in seenIds) {
+                            seenIds.add(id)
+                            result.add(
+                                Gem(
+                                    id = id,
+                                    name = name,
+                                    description = desc,
+                                    isCustom = true
+                                )
+                            )
+                        }
+                    } else {
+                        inspectArray(sub)
+                    }
+                }
+            }
+        }
+
+        try {
+            for (line in body.split("\n")) {
+                if (line.contains("CNgdBe") && line.contains("wrb.fr")) {
+                    val start = line.indexOf("[")
+                    if (start >= 0) {
+                        val chunkArray = JSONArray(line.substring(start))
+                        for (j in 0 until chunkArray.length()) {
+                            val chunk = chunkArray.optJSONArray(j) ?: continue
+                            if (chunk.optString(0) == "wrb.fr" && chunk.optString(1) == "CNgdBe") {
+                                val innerStr = chunk.optString(2, "")
+                                if (innerStr.isNotBlank() && innerStr != "null") {
+                                    val innerData = JSONArray(innerStr)
+                                    inspectArray(innerData)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            Log.e("GeminiWebClient", "parseGemsFromBody error: ${e.message}", e)
+        }
+        return result
+    }
+
+    /**
      * Fork / Branch in new chat from a given message
      */
     suspend fun createBranchInNewChat(conversationId: String, messageId: String): Result<Conversation> = withContext(Dispatchers.IO) {
