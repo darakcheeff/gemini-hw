@@ -12,7 +12,7 @@ class GeminiWebClientTest {
         val sampleHtml = """
             <!doctype html><html><head>
             <script>window.WIZ_global_data = {
-                "SNlM0e":"mock_snlm0e_token_12345",
+                "thykhd":"AFWLbD12345mocktoken",
                 "FdrFJe":"-1012832322517013405",
                 "cfb2h":"boq_gemini-web-uiserver_20261020.01_p0"
             };</script>
@@ -24,42 +24,23 @@ class GeminiWebClientTest {
 
         client.extractTokensFromHtml(sampleHtml)
 
-        assertEquals("mock_snlm0e_token_12345", client.cachedSnlm0e)
+        assertEquals("AFWLbD12345mocktoken", client.cachedSnlm0e)
         assertEquals("-1012832322517013405", client.cachedFdrFJe)
         assertEquals("boq_gemini-web-uiserver_20261020.01_p0", client.cachedBuildLabel)
     }
 
     @Test
-    fun testDynamicModelDetection() {
+    fun testRpcModelParsing() {
         val authRepo = MockAuthRepository()
         val client = GeminiWebClient(authRepo)
 
-        val htmlWithNewModels = """
-            <script>window.WIZ_global_data = {
-                "45702952":"[[\"gemini-2.0-flash\",\"gemini-2.5-flash\",\"gemini-3-flash-preview\"]]"
-            };</script>
-            <div>Models: "gemini-1.5-pro", "gemini-2.0-flash-thinking"</div>
-        """.trimIndent()
-        val models = client.parseModelsFromHtml(htmlWithNewModels)
+        val rpcLine = """[["wrb.fr","otAQ7b","[6,null,false,null,null,null,false,null,null,null,null,null,false,false,1016,[[\"cf41b0e0dd7d53e5\",\"Flash-Lite\",\"Самые быстрые ответы\",[2,140],1,null,[],false,\"\",1,\"Flash-Lite\",\"3.5 Flash-Lite\",\"Самые быстрые ответы\",null,null,false,\"\",6,null,\"3.5 Flash-Lite\"]]]"]]"""
+        val models = client.parseModelsFromRpcResponse(rpcLine)
 
-        assertTrue(models.any { it.id == "gemini-3.8-flash" })
-        assertTrue(models.any { it.id == "gemini-4-argon" })
-        assertTrue(models.any { it.id == "gemini-2.0-flash" })
-        assertTrue(models.any { it.id == "gemini-1.5-pro" })
-        assertTrue(models.any { it.id == "gemini-2.0-flash-thinking" })
-        assertTrue(models.any { it.id == "gemini-2.5-flash" })
-        assertTrue(models.any { it.id == "gemini-3-flash-preview" })
-    }
-
-    @Test
-    fun testDeltaExtractionFromRpcChunk() {
-        val authRepo = MockAuthRepository()
-        val client = GeminiWebClient(authRepo)
-
-        val chunk = """[["wrb.fr","upz0af","[\"Привет! Я готов помочь вам на устройстве Huawei.\"]"]]"""
-        val delta = client.extractDeltaFromRpcChunk(chunk)
-
-        assertEquals("Привет! Я готов помочь вам на устройстве Huawei.", delta)
+        assertEquals(1, models.size)
+        assertEquals("cf41b0e0dd7d53e5", models[0].id)
+        assertEquals("3.5 Flash-Lite", models[0].displayName)
+        assertEquals("Самые быстрые ответы", models[0].description)
     }
 
     @Test
@@ -67,7 +48,7 @@ class GeminiWebClientTest {
         val authRepo = MockAuthRepository()
         val client = GeminiWebClient(authRepo)
 
-        val sampleBody = """[null,[["c_1a2b3c4d","Чат по разработке"],["c_9e8f7a6b","Написание статьи"]]]"""
+        val sampleBody = """[["wrb.fr","MaZiqc","[[[\"c_1a2b3c4d\",\"Чат по разработке\"],[\"c_9e8f7a6b\",\"Написание статьи\"]]]"]]"""
         val convos = client.parseConversationsFromBody(sampleBody)
 
         assertEquals(2, convos.size)

@@ -87,6 +87,8 @@ fun ModelSelectorDropdown(
                                             text = model.badge ?: "",
                                             fontSize = 11.sp,
                                             fontWeight = FontWeight.SemiBold,
+                                            maxLines = 1,
+                                            softWrap = false,
                                             color = MaterialTheme.colorScheme.primary,
                                             modifier = Modifier
                                                 .clip(RoundedCornerShape(4.dp))
