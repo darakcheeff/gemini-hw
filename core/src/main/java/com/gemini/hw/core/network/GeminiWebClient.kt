@@ -665,7 +665,14 @@ class GeminiWebClient(
                                                     val m2 = if (m1.isEmpty()) parts?.optString(0, "") ?: "" else m1
                                                     val m3 = if (m2.isEmpty()) firstCand.optString(1, "") else m2
                                                     if (m3.isNotBlank()) {
-                                                        modelText = m3
+                                                        val candStr = firstCand.toString()
+                                                        val ggDlRegex = Regex("""https://[a-zA-Z0-9.\-_/]*googleusercontent\.com/(?:gg-dl|gg)/[^\s\)\"\'\]]+""")
+                                                        val foundGg = ggDlRegex.findAll(candStr).map { it.value }.toList()
+                                                        modelText = if (foundGg.isNotEmpty()) {
+                                                            m3.replace(Regex("""http://googleusercontent\.com/image_generation_content/\d+_\d+"""), foundGg.first())
+                                                        } else {
+                                                            m3
+                                                        }
                                                         break
                                                     }
                                                 }
