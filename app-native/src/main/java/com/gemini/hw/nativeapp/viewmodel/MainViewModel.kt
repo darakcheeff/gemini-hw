@@ -319,6 +319,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
         viewModelScope.launch {
             try { client.addConversationToNotebook(conversationId, targetNorm) } catch (_: Exception) {}
+            refreshConversations()
             loadNotebookConversations(targetNorm)
         }
     }
@@ -335,6 +336,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
         viewModelScope.launch {
             try { client.removeConversationFromNotebook(conversationId, targetNorm) } catch (_: Exception) {}
+            refreshConversations()
             loadNotebookConversations(targetNorm)
         }
     }
