@@ -39,8 +39,22 @@ class AssistantActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         voiceInputManager = VoiceInputManager(this)
 
-        val screenshotBitmap = AssistantOverlayHolder.latestScreenshotBitmap
-        val screenshotUri = AssistantOverlayHolder.latestScreenshotUri
+        var screenshotBitmap = AssistantOverlayHolder.latestScreenshotBitmap
+        var screenshotUri = AssistantOverlayHolder.latestScreenshotUri
+
+        if (screenshotUri == null) {
+            val fallbackUri = getLatestScreenshotUri()
+            if (fallbackUri != null) {
+                screenshotUri = fallbackUri
+                try {
+                    contentResolver.openInputStream(fallbackUri)?.use { input ->
+                        screenshotBitmap = android.graphics.BitmapFactory.decodeStream(input)
+                    }
+                } catch (e: Exception) {
+                    // ignore
+                }
+            }
+        }
 
         setContent {
             var inputText by remember { mutableStateOf("") }
@@ -222,6 +236,35 @@ class AssistantActivity : ComponentActivity() {
                 }
             }
         }
+    }
+
+    private fun getLatestScreenshotUri(): android.net.Uri? {
+        try {
+            val projection = arrayOf(
+                android.provider.MediaStore.Images.Media._ID,
+                android.provider.MediaStore.Images.Media.DATE_ADDED
+            )
+            val sortOrder = "${android.provider.MediaStore.Images.Media.DATE_ADDED} DESC"
+            contentResolver.query(
+                android.provider.MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
+                projection,
+                null,
+                null,
+                sortOrder
+            )?.use { cursor ->
+                if (cursor.moveToFirst()) {
+                    val idCol = cursor.getColumnIndexOrThrow(android.provider.MediaStore.Images.Media._ID)
+                    val id = cursor.getLong(idCol)
+                    return android.content.ContentUris.withAppendedId(
+                        android.provider.MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
+                        id
+                    )
+                }
+            }
+        } catch (e: Exception) {
+            // ignore
+        }
+        return null
     }
 
     private fun dispatchQuery(query: String, uriStr: String?) {
