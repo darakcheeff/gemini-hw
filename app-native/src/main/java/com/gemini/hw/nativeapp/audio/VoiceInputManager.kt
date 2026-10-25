@@ -1,103 +1,101 @@
 package com.gemini.hw.nativeapp.audio
 
 import android.content.Context
-import android.content.Intent
-import android.os.Bundle
+import android.media.MediaRecorder
+import android.os.Build
 import android.os.Handler
 import android.os.Looper
-import android.speech.RecognitionListener
-import android.speech.RecognizerIntent
-import android.speech.SpeechRecognizer
 import android.util.Log
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import java.io.File
 
+/**
+ * Autonomous Voice Manager for GMS-free devices (Huawei / HarmonyOS / AOSP).
+ * Uses Android's native MediaRecorder to capture audio directly from hardware
+ * without depending on Google Play Services or Google SpeechRecognizer.
+ */
 class VoiceInputManager(private val context: Context) {
-    private var speechRecognizer: SpeechRecognizer? = null
+    private var mediaRecorder: MediaRecorder? = null
+    private var currentOutputFile: File? = null
     private val mainHandler = Handler(Looper.getMainLooper())
 
-    fun startListening(
-        onPartialResult: (String) -> Unit,
-        onFinalResult: (String) -> Unit,
-        onError: (String) -> Unit,
-        onStateChange: (Boolean) -> Unit
-    ) {
-        mainHandler.post {
-            try {
-                stopListening()
-                if (!SpeechRecognizer.isRecognitionAvailable(context)) {
-                    onError("Распознавание речи недоступно на устройстве")
-                    return@post
-                }
+    private val _isRecording = MutableStateFlow(false)
+    val isRecording: StateFlow<Boolean> = _isRecording.asStateFlow()
 
-                speechRecognizer = SpeechRecognizer.createSpeechRecognizer(context).apply {
-                    setRecognitionListener(object : RecognitionListener {
-                        override fun onReadyForSpeech(params: Bundle?) {
-                            onStateChange(true)
-                        }
+    fun startRecording(
+        onError: (String) -> Unit = {}
+    ): Boolean {
+        return try {
+            stopRecording()
 
-                        override fun onBeginningOfSpeech() {}
-                        override fun onRmsChanged(rmsdB: Float) {}
-                        override fun onBufferReceived(buffer: ByteArray?) {}
-                        override fun onEndOfSpeech() {}
+            val file = File(context.cacheDir, "voice_record_${System.currentTimeMillis()}.m4a")
+            currentOutputFile = file
 
-                        override fun onError(error: Int) {
-                            onStateChange(false)
-                            val errMsg = when (error) {
-                                SpeechRecognizer.ERROR_NO_MATCH -> "Речь не распознана"
-                                SpeechRecognizer.ERROR_SPEECH_TIMEOUT -> "Время ожидания речи истекло"
-                                SpeechRecognizer.ERROR_AUDIO -> "Ошибка записи звука"
-                                SpeechRecognizer.ERROR_NETWORK -> "Ошибка сети"
-                                SpeechRecognizer.ERROR_CLIENT -> "Отменено"
-                                else -> "Ошибка распознавания ($error)"
-                            }
-                            Log.w("VoiceInputManager", "onError: $errMsg ($error)")
-                            onError(errMsg)
-                        }
-
-                        override fun onResults(results: Bundle?) {
-                            onStateChange(false)
-                            val matches = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
-                            val text = matches?.firstOrNull() ?: ""
-                            if (text.isNotBlank()) {
-                                onFinalResult(text)
-                            }
-                        }
-
-                        override fun onPartialResults(partialResults: Bundle?) {
-                            val matches = partialResults?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
-                            val text = matches?.firstOrNull() ?: ""
-                            if (text.isNotBlank()) {
-                                onPartialResult(text)
-                            }
-                        }
-
-                        override fun onEvent(eventType: Int, params: Bundle?) {}
-                    })
-                }
-
-                val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
-                    putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
-                    putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
-                    putExtra(RecognizerIntent.EXTRA_LANGUAGE, "ru-RU")
-                    putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 3)
-                }
-
-                speechRecognizer?.startListening(intent)
-            } catch (e: Exception) {
-                Log.e("VoiceInputManager", "startListening error: ${e.message}", e)
-                onStateChange(false)
-                onError("Сбой запуска микрофона: ${e.message}")
+            val recorder = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                MediaRecorder(context)
+            } else {
+                @Suppress("DEPRECATION")
+                MediaRecorder()
             }
+
+            recorder.apply {
+                setAudioSource(MediaRecorder.AudioSource.MIC)
+                setOutputFormat(MediaRecorder.OutputFormat.MPEG_4)
+                setAudioEncoder(MediaRecorder.AudioEncoder.AAC)
+                setAudioEncodingBitRate(64000)
+                setAudioSamplingRate(44100)
+                setOutputFile(file.absolutePath)
+                prepare()
+                start()
+            }
+
+            mediaRecorder = recorder
+            _isRecording.value = true
+            Log.d("VoiceInputManager", "Recording started: ${file.absolutePath}")
+            true
+        } catch (e: Exception) {
+            Log.e("VoiceInputManager", "startRecording error: ${e.message}", e)
+            _isRecording.value = false
+            mediaRecorder = null
+            onError("Не удалось запустить запись: ${e.message}")
+            false
         }
     }
 
-    fun stopListening() {
-        mainHandler.post {
-            try {
-                speechRecognizer?.stopListening()
-                speechRecognizer?.cancel()
-                speechRecognizer?.destroy()
-            } catch (_: Exception) {}
-            speechRecognizer = null
+    fun stopRecording(): File? {
+        val file = currentOutputFile
+        try {
+            if (_isRecording.value && mediaRecorder != null) {
+                mediaRecorder?.stop()
+                mediaRecorder?.reset()
+                mediaRecorder?.release()
+            }
+        } catch (e: Exception) {
+            Log.w("VoiceInputManager", "stopRecording error: ${e.message}")
+        } finally {
+            mediaRecorder = null
+            _isRecording.value = false
         }
+        return if (file != null && file.exists() && file.length() > 0) file else null
+    }
+
+    fun getMaxAmplitude(): Int {
+        return try {
+            if (_isRecording.value) {
+                mediaRecorder?.maxAmplitude ?: 0
+            } else 0
+        } catch (_: Exception) {
+            0
+        }
+    }
+
+    fun cancelRecording() {
+        try {
+            stopRecording()
+            currentOutputFile?.delete()
+            currentOutputFile = null
+        } catch (_: Exception) {}
     }
 }

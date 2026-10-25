@@ -487,6 +487,78 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         _isRecordingVoice.value = false
     }
 
+    val isTranscribing = MutableStateFlow(false)
+
+    fun transcribeVoiceAudio(file: java.io.File, onResult: (String) -> Unit, onError: (String) -> Unit) {
+        viewModelScope.launch {
+            isTranscribing.value = true
+            try {
+                val bytes = file.readBytes()
+                val result = client.transcribeAudio(bytes, "audio/mp4")
+                isTranscribing.value = false
+                if (result.isSuccess) {
+                    onResult(result.getOrNull() ?: "")
+                } else {
+                    onError(result.exceptionOrNull()?.message ?: "Ошибка транскрибации")
+                }
+            } catch (e: Exception) {
+                isTranscribing.value = false
+                onError(e.message ?: "Ошибка")
+            } finally {
+                file.delete()
+            }
+        }
+    }
+
+    fun sendLiveAudioMessage(
+        audioFile: java.io.File,
+        prompt: String = "Отвечай кратко, емко и разговорно, как собеседник в реальном времени.",
+        onStreamingChunk: (String) -> Unit,
+        onDone: (String) -> Unit,
+        onError: (String) -> Unit
+    ) {
+        viewModelScope.launch {
+            try {
+                val bytes = audioFile.readBytes()
+                val uploadRes = client.uploadFile(bytes, "live_voice.m4a", "audio/mp4")
+                if (uploadRes.isFailure) {
+                    onError(uploadRes.exceptionOrNull()?.message ?: "Не удалось отправить аудио")
+                    return@launch
+                }
+                val ref = uploadRes.getOrNull() ?: run {
+                    onError("Пустой ответ от сервера")
+                    return@launch
+                }
+                val att = Attachment(
+                    id = java.util.UUID.randomUUID().toString(),
+                    name = "live_voice.m4a",
+                    mimeType = "audio/mp4",
+                    url = ref,
+                    size = bytes.size.toLong()
+                )
+
+                var fullResponse = ""
+                client.sendMessageStream(
+                    conversationId = _currentConversationId.value,
+                    prompt = prompt,
+                    modelId = _selectedModel.value.id,
+                    attachments = listOf(att),
+                    notebookId = _activeNotebook.value?.id
+                ).collect { chunk ->
+                    if (chunk.content.isNotBlank()) {
+                        fullResponse = chunk.content
+                        onStreamingChunk(fullResponse)
+                    }
+                }
+                onDone(fullResponse)
+            } catch (e: Exception) {
+                onError(e.message ?: "Ошибка")
+            } finally {
+                audioFile.delete()
+            }
+        }
+    }
+
     /**
      * Edit a previously sent message and regenerate response
      */

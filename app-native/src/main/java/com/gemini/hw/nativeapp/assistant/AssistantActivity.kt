@@ -179,24 +179,16 @@ class AssistantActivity : ComponentActivity() {
                                     IconButton(
                                         onClick = {
                                             if (isListening) {
-                                                voiceInputManager.stopListening()
                                                 isListening = false
+                                                val file = voiceInputManager.stopRecording()
+                                                if (file != null) {
+                                                    inputText = "Анализ экрана по голосовому запросу"
+                                                }
                                             } else {
-                                                voiceInputManager.startListening(
-                                                    onPartialResult = { partial ->
-                                                        inputText = partial
-                                                    },
-                                                    onFinalResult = { final ->
-                                                        inputText = final
-                                                        isListening = false
-                                                    },
-                                                    onError = {
-                                                        isListening = false
-                                                    },
-                                                    onStateChange = { listening ->
-                                                        isListening = listening
-                                                    }
-                                                )
+                                                val ok = voiceInputManager.startRecording()
+                                                if (ok) {
+                                                    isListening = true
+                                                }
                                             }
                                         }
                                     ) {
@@ -246,7 +238,7 @@ class AssistantActivity : ComponentActivity() {
 
     override fun onDestroy() {
         super.onDestroy()
-        voiceInputManager.stopListening()
+        voiceInputManager.cancelRecording()
     }
 
     companion object {

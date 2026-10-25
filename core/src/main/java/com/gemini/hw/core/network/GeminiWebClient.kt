@@ -216,7 +216,12 @@ class GeminiWebClient(
                 for (att in attachments) {
                     val refPath = att.url
                     if (!refPath.isNullOrBlank()) {
-                        val kind = if (att.mimeType.startsWith("image/")) 1 else 3
+                        val kind = when {
+                            att.mimeType.startsWith("image/") -> 1
+                            att.mimeType.startsWith("audio/") -> 2
+                            att.mimeType.startsWith("video/") -> 4
+                            else -> 3
+                        }
                         val meta = JSONArray().apply {
                             put(refPath)
                             put(kind)
@@ -1312,6 +1317,45 @@ class GeminiWebClient(
             }
         } catch (e: Exception) {
             Log.e("GeminiWebClient", "Upload error: ${e.message}", e)
+            Result.failure(e)
+        }
+    }
+
+    /**
+     * Transcribes an audio recording autonomously using Gemini's native multimodal audio engine,
+     * with zero dependencies on GMS or Google speech services.
+     */
+    suspend fun transcribeAudio(
+        audioBytes: ByteArray,
+        mimeType: String = "audio/mp4"
+    ): Result<String> = withContext(Dispatchers.IO) {
+        try {
+            val uploadRes = uploadFile(audioBytes, "voice_record.m4a", mimeType)
+            if (uploadRes.isFailure) {
+                return@withContext Result.failure(uploadRes.exceptionOrNull() ?: Exception("Не удалось загрузить аудио"))
+            }
+            val ref = uploadRes.getOrNull() ?: return@withContext Result.failure(Exception("Пустой ответ от сервера загрузки"))
+            val att = Attachment(
+                id = java.util.UUID.randomUUID().toString(),
+                name = "voice_record.m4a",
+                mimeType = mimeType,
+                url = ref,
+                size = audioBytes.size.toLong()
+            )
+            var recognizedText = ""
+            sendMessageStream(
+                conversationId = null,
+                prompt = "Транскрибируй эту аудиозапись дословно на языке оригинала. Выведи ТОЛЬКО расшифрованный текст без кавычек, без оформления, без пояснений и без дополнительных слов.",
+                modelId = "default",
+                attachments = listOf(att)
+            ).collect { msg ->
+                if (msg.content.isNotBlank()) {
+                    recognizedText = msg.content
+                }
+            }
+            val clean = recognizedText.trim().removeSurrounding("\"").removeSurrounding("'")
+            Result.success(clean)
+        } catch (e: Exception) {
             Result.failure(e)
         }
     }

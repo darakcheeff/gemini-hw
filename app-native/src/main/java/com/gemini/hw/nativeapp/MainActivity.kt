@@ -135,13 +135,15 @@ fun MainScreen(viewModel: MainViewModel) {
 
     val voiceInputManager = remember { com.gemini.hw.nativeapp.audio.VoiceInputManager(context) }
     var isVoiceListening by remember { mutableStateOf(false) }
+    var showLiveDialog by remember { mutableStateOf(false) }
+    val isTranscribing by viewModel.isTranscribing.collectAsState()
 
     val ttsManager = remember { TtsManager(context) }
     val speakingMsgId by ttsManager.speakingMessageId.collectAsState()
 
     DisposableEffect(Unit) {
         onDispose {
-            voiceInputManager.stopListening()
+            voiceInputManager.cancelRecording()
             ttsManager.destroy()
         }
     }
@@ -883,25 +885,30 @@ fun MainScreen(viewModel: MainViewModel) {
                                 onClick = {
                                     if (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
                                         if (isVoiceListening) {
-                                            voiceInputManager.stopListening()
                                             isVoiceListening = false
+                                            val file = voiceInputManager.stopRecording()
+                                            if (file != null) {
+                                                Toast.makeText(context, "Распознавание речи...", Toast.LENGTH_SHORT).show()
+                                                viewModel.transcribeVoiceAudio(
+                                                    file = file,
+                                                    onResult = { text ->
+                                                        if (text.isNotBlank()) {
+                                                            inputText = if (inputText.isBlank()) text else "$inputText $text"
+                                                        }
+                                                    },
+                                                    onError = { err ->
+                                                        Toast.makeText(context, err, Toast.LENGTH_SHORT).show()
+                                                    }
+                                                )
+                                            }
                                         } else {
-                                            voiceInputManager.startListening(
-                                                onPartialResult = { partial ->
-                                                    inputText = partial
-                                                },
-                                                onFinalResult = { final ->
-                                                    inputText = final
-                                                    isVoiceListening = false
-                                                },
-                                                onError = { err ->
-                                                    isVoiceListening = false
-                                                    Toast.makeText(context, err, Toast.LENGTH_SHORT).show()
-                                                },
-                                                onStateChange = { listening ->
-                                                    isVoiceListening = listening
-                                                }
-                                            )
+                                            val ok = voiceInputManager.startRecording { err ->
+                                                Toast.makeText(context, err, Toast.LENGTH_SHORT).show()
+                                            }
+                                            if (ok) {
+                                                isVoiceListening = true
+                                                Toast.makeText(context, "Говорите... Нажмите снова для завершения", Toast.LENGTH_SHORT).show()
+                                            }
                                         }
                                     } else {
                                         permissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
@@ -910,37 +917,33 @@ fun MainScreen(viewModel: MainViewModel) {
                                 modifier = Modifier
                                     .size(42.dp)
                                     .clip(CircleShape)
-                                    .background(if (isVoiceListening) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.surfaceVariant)
+                                    .background(
+                                        if (isVoiceListening) MaterialTheme.colorScheme.error 
+                                        else if (isTranscribing) MaterialTheme.colorScheme.tertiary 
+                                        else MaterialTheme.colorScheme.surfaceVariant
+                                    )
                             ) {
-                                Icon(
-                                    if (isVoiceListening) Icons.Default.Stop else Icons.Default.Mic,
-                                    contentDescription = "Голосовой ввод",
-                                    tint = if (isVoiceListening) Color.White else MaterialTheme.colorScheme.onSurface
-                                )
+                                if (isTranscribing) {
+                                    CircularProgressIndicator(
+                                        modifier = Modifier.size(20.dp),
+                                        strokeWidth = 2.dp,
+                                        color = MaterialTheme.colorScheme.onTertiary
+                                    )
+                                } else {
+                                    Icon(
+                                        if (isVoiceListening) Icons.Default.Stop else Icons.Default.Mic,
+                                        contentDescription = "Голосовой ввод",
+                                        tint = if (isVoiceListening) Color.White else MaterialTheme.colorScheme.onSurface
+                                    )
+                                }
                             }
 
                             IconButton(
                                 onClick = {
-                                    try {
-                                        val liveIntent = Intent().apply {
-                                            setClassName(
-                                                "com.google.android.googlequicksearchbox",
-                                                "com.google.android.apps.search.assistant.surfaces.voice.robin.main.MainActivity"
-                                            )
-                                            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                                        }
-                                        context.startActivity(liveIntent)
-                                    } catch (e: Exception) {
-                                        try {
-                                            val bardIntent = context.packageManager.getLaunchIntentForPackage("com.google.android.apps.bard")
-                                            if (bardIntent != null) {
-                                                context.startActivity(bardIntent)
-                                            } else {
-                                                Toast.makeText(context, "Gemini Live недоступен на этом устройстве", Toast.LENGTH_SHORT).show()
-                                            }
-                                        } catch (_: Exception) {
-                                            Toast.makeText(context, "Не удалось запустить Gemini Live", Toast.LENGTH_SHORT).show()
-                                        }
+                                    if (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
+                                        showLiveDialog = true
+                                    } else {
+                                        permissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
                                     }
                                 },
                                 modifier = Modifier
@@ -1063,6 +1066,15 @@ fun MainScreen(viewModel: MainViewModel) {
             onRevisionPrompt = { prompt ->
                 viewModel.sendMessage(prompt)
             }
+        )
+    }
+
+    if (showLiveDialog) {
+        com.gemini.hw.nativeapp.ui.components.GeminiLiveDialog(
+            onDismiss = { showLiveDialog = false },
+            viewModel = viewModel,
+            ttsManager = ttsManager,
+            voiceInputManager = voiceInputManager
         )
     }
 
@@ -1249,7 +1261,7 @@ fun NotebookView(
 
     DisposableEffect(Unit) {
         onDispose {
-            nbVoiceManager.stopListening()
+            nbVoiceManager.cancelRecording()
         }
     }
 
@@ -1422,25 +1434,14 @@ fun NotebookView(
                 IconButton(
                     onClick = {
                         if (isNbVoiceListening) {
-                            nbVoiceManager.stopListening()
                             isNbVoiceListening = false
+                            val file = nbVoiceManager.stopRecording()
+                            if (file != null) {
+                                inputText = if (inputText.isBlank()) "Голосовая заметка" else "$inputText [голос]"
+                            }
                         } else {
-                            nbVoiceManager.startListening(
-                                onPartialResult = { partial ->
-                                    inputText = partial
-                                },
-                                onFinalResult = { final ->
-                                    inputText = final
-                                    isNbVoiceListening = false
-                                },
-                                onError = { err ->
-                                    isNbVoiceListening = false
-                                    Toast.makeText(context, err, Toast.LENGTH_SHORT).show()
-                                },
-                                onStateChange = { listening ->
-                                    isNbVoiceListening = listening
-                                }
-                            )
+                            val ok = nbVoiceManager.startRecording()
+                            if (ok) isNbVoiceListening = true
                         }
                     },
                     modifier = Modifier.size(36.dp)
@@ -1449,39 +1450,6 @@ fun NotebookView(
                         if (isNbVoiceListening) Icons.Default.Stop else Icons.Default.Mic,
                         contentDescription = "Голос",
                         tint = if (isNbVoiceListening) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-
-                IconButton(
-                    onClick = {
-                        try {
-                            val liveIntent = Intent().apply {
-                                setClassName(
-                                    "com.google.android.googlequicksearchbox",
-                                    "com.google.android.apps.search.assistant.surfaces.voice.robin.main.MainActivity"
-                                )
-                                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                            }
-                            context.startActivity(liveIntent)
-                        } catch (e: Exception) {
-                            try {
-                                val bardIntent = context.packageManager.getLaunchIntentForPackage("com.google.android.apps.bard")
-                                if (bardIntent != null) {
-                                    context.startActivity(bardIntent)
-                                } else {
-                                    Toast.makeText(context, "Gemini Live недоступен на этом устройстве", Toast.LENGTH_SHORT).show()
-                                }
-                            } catch (_: Exception) {
-                                Toast.makeText(context, "Не удалось запустить Gemini Live", Toast.LENGTH_SHORT).show()
-                            }
-                        }
-                    },
-                    modifier = Modifier.size(36.dp)
-                ) {
-                    Icon(
-                        Icons.Default.GraphicEq,
-                        contentDescription = "Gemini Live",
-                        tint = MaterialTheme.colorScheme.primary
                     )
                 }
 
