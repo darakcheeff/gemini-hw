@@ -44,7 +44,7 @@ class AssistantActivity : ComponentActivity() {
 
         setContent {
             var inputText by remember { mutableStateOf("") }
-            val isListening by voiceInputManager.isListening.collectAsState()
+            var isListening by remember { mutableStateOf(false) }
 
             // Dismiss when tapping outside the bottom sheet
             Box(
@@ -180,12 +180,22 @@ class AssistantActivity : ComponentActivity() {
                                         onClick = {
                                             if (isListening) {
                                                 voiceInputManager.stopListening()
+                                                isListening = false
                                             } else {
                                                 voiceInputManager.startListening(
-                                                    onResult = { recognized ->
-                                                        inputText = if (inputText.isBlank()) recognized else "$inputText $recognized"
+                                                    onPartialResult = { partial ->
+                                                        inputText = partial
                                                     },
-                                                    onError = {}
+                                                    onFinalResult = { final ->
+                                                        inputText = final
+                                                        isListening = false
+                                                    },
+                                                    onError = {
+                                                        isListening = false
+                                                    },
+                                                    onStateChange = { listening ->
+                                                        isListening = listening
+                                                    }
                                                 )
                                             }
                                         }
@@ -236,7 +246,7 @@ class AssistantActivity : ComponentActivity() {
 
     override fun onDestroy() {
         super.onDestroy()
-        voiceInputManager.destroy()
+        voiceInputManager.stopListening()
     }
 
     companion object {

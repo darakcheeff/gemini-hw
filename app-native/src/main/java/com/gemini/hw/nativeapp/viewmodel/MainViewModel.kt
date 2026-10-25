@@ -469,7 +469,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         text = "🎤 [Голосовое сообщение]"
                     )
                     _messages.value = _messages.value + userMsg
-                    dispatchToGemini("Ответь на аудиозапись", audioBytes)
+                    val att = Attachment(
+                        id = "att_voice_" + System.currentTimeMillis(),
+                        name = "voice_recording.m4a",
+                        mimeType = "audio/mp4"
+                    )
+                    dispatchToGemini("Ответь на голосовое сообщение", listOf(att))
                 }
             } catch (e: Exception) {
                 _isRecordingVoice.value = false
@@ -493,7 +498,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             val subList = list.subList(0, index + 1).toMutableList()
             subList[index] = edited
             _messages.value = subList
-            dispatchToGemini(newText, null)
+            dispatchToGemini(newText, emptyList())
         }
     }
 
