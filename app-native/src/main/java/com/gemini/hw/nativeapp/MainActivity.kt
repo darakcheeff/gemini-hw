@@ -1786,6 +1786,7 @@ fun NotebookView(
         }
     }
 }
+}
 
 @Composable
 fun ChatActionMenuDialog(
