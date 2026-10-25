@@ -88,6 +88,7 @@ fun MainScreen(viewModel: MainViewModel) {
 
     var showGemsDialog by remember { mutableStateOf(false) }
     var showNotebooksDialog by remember { mutableStateOf(false) }
+    var showCreateNotebookDialog by remember { mutableStateOf(false) }
     var showSparkDialog by remember { mutableStateOf(false) }
     var showScheduledDialog by remember { mutableStateOf(false) }
     var showAddSourceDialog by remember { mutableStateOf(false) }
@@ -270,7 +271,7 @@ fun MainScreen(viewModel: MainViewModel) {
                             selected = false,
                             onClick = {
                                 coroutineScope.launch { drawerState.close() }
-                                showNotebooksDialog = true
+                                showCreateNotebookDialog = true
                             },
                             modifier = Modifier.padding(horizontal = 12.dp, vertical = 2.dp)
                         )
@@ -670,6 +671,51 @@ fun MainScreen(viewModel: MainViewModel) {
                 showNotebooksDialog = false
             },
             onDismiss = { showNotebooksDialog = false }
+        )
+    }
+
+    if (showCreateNotebookDialog) {
+        var createTitle by remember { mutableStateOf("") }
+        var createContent by remember { mutableStateOf("") }
+        AlertDialog(
+            onDismissRequest = { showCreateNotebookDialog = false },
+            title = { Text("Новый блокнот") },
+            text = {
+                Column {
+                    OutlinedTextField(
+                        value = createTitle,
+                        onValueChange = { createTitle = it },
+                        label = { Text("Название блокнота") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    OutlinedTextField(
+                        value = createContent,
+                        onValueChange = { createContent = it },
+                        label = { Text("Заметки (необязательно)") },
+                        modifier = Modifier.fillMaxWidth().heightIn(min = 80.dp),
+                        maxLines = 4
+                    )
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        if (createTitle.isNotBlank()) {
+                            viewModel.addNotebook(createTitle.trim(), createContent.trim())
+                            showCreateNotebookDialog = false
+                        }
+                    }
+                ) {
+                    Text("Создать")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showCreateNotebookDialog = false }) {
+                    Text("Отмена")
+                }
+            }
         )
     }
 

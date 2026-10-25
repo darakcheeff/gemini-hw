@@ -115,11 +115,27 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun addNotebook(title: String, content: String = "") {
-        gemsAndSparkRepo.addNotebook(title, content)
+        if (title.isBlank()) return
+        val trimmed = title.trim()
+        viewModelScope.launch {
+            _isLoading.value = true
+            val res = client.createNotebook(trimmed)
+            val id = if (res.isSuccess) res.getOrThrow() else "nb_" + System.currentTimeMillis()
+            gemsAndSparkRepo.addNotebook(trimmed, content, id)
+            refreshNotebooks()
+            _isLoading.value = false
+        }
     }
 
     fun removeNotebook(id: String) {
         gemsAndSparkRepo.removeNotebook(id)
+        if (_currentNotebook.value?.id == id) {
+            _currentNotebook.value = null
+        }
+        viewModelScope.launch {
+            client.deleteNotebook(id)
+            refreshNotebooks()
+        }
     }
 
     fun selectGem(gem: Gem) {
@@ -174,6 +190,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
         viewModelScope.launch {
             client.addConversationToNotebook(conversationId, targetNotebookId)
+            refreshConversations()
         }
     }
 
@@ -183,16 +200,19 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
         viewModelScope.launch {
             client.removeConversationFromNotebook(conversationId, notebookId)
+            refreshConversations()
         }
     }
 
     fun renameConversation(conversationId: String, newTitle: String) {
         if (newTitle.isBlank()) return
+        val trimmed = newTitle.trim()
         _conversations.value = _conversations.value.map {
-            if (it.id == conversationId) it.copy(title = newTitle.trim()) else it
+            if (it.id == conversationId) it.copy(title = trimmed) else it
         }
         viewModelScope.launch {
-            client.renameConversation(conversationId, newTitle.trim())
+            client.renameConversation(conversationId, trimmed)
+            refreshConversations()
         }
     }
 
@@ -203,22 +223,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
         viewModelScope.launch {
             client.deleteConversation(conversationId)
+            refreshConversations()
         }
     }
 
     fun startChatInNotebook(notebook: Notebook, prompt: String) {
         if (prompt.isBlank()) return
         _currentNotebook.value = null
-        val convoId = "c_nb_" + System.currentTimeMillis()
-        val newConvo = Conversation(
-            id = convoId,
-            title = prompt.take(30),
-            notebookId = notebook.id
-        )
-        _conversations.value = listOf(newConvo) + _conversations.value
-        _currentConversationId.value = convoId
+        _currentConversationId.value = null
         _messages.value = emptyList()
-        sendMessage(prompt)
+        sendMessage(prompt, targetNotebookId = notebook.id)
     }
 
     fun selectConversation(conversationId: String?) {
@@ -251,7 +265,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         _thinkingLevel.value = level
     }
 
-    fun sendMessage(text: String) {
+    fun sendMessage(text: String, targetNotebookId: String? = null) {
         if (text.isBlank()) return
         val userMsgId = "msg_u_" + System.currentTimeMillis()
         val userMsg = ChatMessage(
@@ -262,10 +276,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         )
 
         _messages.value = _messages.value + userMsg
-        dispatchToGemini(text, null)
+        dispatchToGemini(text, null, targetNotebookId)
     }
 
-    private fun dispatchToGemini(prompt: String, audioBytes: ByteArray?) {
+    private fun dispatchToGemini(prompt: String, audioBytes: ByteArray?, targetNotebookId: String? = null) {
         viewModelScope.launch {
             _isLoading.value = true
             val convoId = _currentConversationId.value
@@ -289,6 +303,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     _messages.value = list
                     if (_currentConversationId.value == null) {
                         _currentConversationId.value = responseMsg.conversationId
+                        if (targetNotebookId != null) {
+                            viewModelScope.launch {
+                                client.addConversationToNotebook(responseMsg.conversationId, targetNotebookId)
+                                refreshConversations()
+                            }
+                        }
                     }
                 }
 

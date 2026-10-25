@@ -29,13 +29,14 @@ class GemsAndSparkRepository {
         _notebooks.value = list + keptLocal
     }
 
-    fun addNotebook(title: String, content: String = "") {
+    fun addNotebook(title: String, content: String = "", id: String? = null): Notebook {
         val nb = Notebook(
-            id = "nb_" + System.currentTimeMillis(),
+            id = id ?: ("nb_" + System.currentTimeMillis()),
             title = title,
             content = content
         )
         _notebooks.value = listOf(nb) + _notebooks.value
+        return nb
     }
 
     fun removeNotebook(id: String) {

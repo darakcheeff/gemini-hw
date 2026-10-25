@@ -356,7 +356,21 @@ class GeminiWebClient(
                         val finalId = if (id.startsWith("c_")) id else "c_$id"
                         if (finalId !in seenIds) {
                             seenIds.add(finalId)
-                            result.add(Conversation(id = finalId, title = title.ifBlank { "Новый чат" }))
+                            var projectRef: String? = null
+                            for (idx in listOf(27, 28, 26, 29, 2)) {
+                                val cand = sub.optString(idx, "")
+                                if (cand.startsWith("notebooks/") || cand.startsWith("projects/") || cand.startsWith("nb_")) {
+                                    projectRef = cand
+                                    break
+                                }
+                            }
+                            result.add(
+                                Conversation(
+                                    id = finalId,
+                                    title = title.ifBlank { "Новый чат" },
+                                    notebookId = projectRef
+                                )
+                            )
                         }
                     } else {
                         inspectArray(sub)
@@ -860,128 +874,222 @@ class GeminiWebClient(
         Result.success(Conversation(id = newId, title = "Ветвь чата"))
     }
 
+    /**
+     * Executes a Google batchexecute RPC request.
+     */
+    suspend fun callBatchexecuteRPC(rpcId: String, innerPayloadJson: String): Result<String> = withContext(Dispatchers.IO) {
+        try {
+            if (cachedSnlm0e.isNullOrBlank()) {
+                refreshTokensAndFetchModels()
+            }
+            val snlm0e = cachedSnlm0e ?: authRepository.getSnlm0eToken() ?: ""
+            val cookie = authRepository.getCookieString()
+            val fsid = cachedFdrFJe ?: ""
+            val bl = cachedBuildLabel ?: "boq_gemini-web-uiserver_20261023.01_p0"
+
+            val fReq = "[[[\"$rpcId\",\"${innerPayloadJson.replace("\\", "\\\\").replace("\"", "\\\"")}\",null,\"generic\"]]]"
+            val postData = "f.req=" + URLEncoder.encode(fReq, "UTF-8") + "&at=" + URLEncoder.encode(snlm0e, "UTF-8")
+            val url = "$BATCH_EXECUTE_URL?rpcids=$rpcId&f.sid=$fsid&bl=$bl&hl=ru&_reqid=${nextReqId()}&rt=c"
+
+            Log.d("GeminiWebClient", "callBatchexecuteRPC $rpcId url: $url")
+            Log.d("GeminiWebClient", "callBatchexecuteRPC $rpcId payload: $innerPayloadJson")
+
+            val request = Request.Builder()
+                .url(url)
+                .addHeader("User-Agent", USER_AGENT)
+                .addHeader("Content-Type", "application/x-www-form-urlencoded;charset=UTF-8")
+                .addHeader("Origin", "https://gemini.google.com")
+                .addHeader("Referer", "https://gemini.google.com/")
+                .addHeader("X-Same-Domain", "1")
+                .addHeader("Cookie", cookie)
+                .post(postData.toRequestBody("application/x-www-form-urlencoded;charset=UTF-8".toMediaType()))
+                .build()
+
+            client.newCall(request).execute().use { response ->
+                Log.d("GeminiWebClient", "callBatchexecuteRPC $rpcId status: ${response.code}")
+                val body = response.body?.string() ?: ""
+                if (!response.isSuccessful) {
+                    Log.e("GeminiWebClient", "callBatchexecuteRPC $rpcId failed HTTP ${response.code}: $body")
+                    return@withContext Result.failure(Exception("HTTP ${response.code}: $body"))
+                }
+
+                for (line in body.split("\n")) {
+                    if (line.contains(rpcId) && line.contains("wrb.fr")) {
+                        val start = line.indexOf("[")
+                        if (start >= 0) {
+                            val chunkArray = JSONArray(line.substring(start))
+                            for (j in 0 until chunkArray.length()) {
+                                val chunk = chunkArray.optJSONArray(j) ?: continue
+                                if (chunk.optString(0) == "wrb.fr" && chunk.optString(1) == rpcId) {
+                                    val innerStr = chunk.optString(2, "")
+                                    Log.d("GeminiWebClient", "callBatchexecuteRPC $rpcId wrb.fr: $innerStr")
+                                    return@withContext Result.success(innerStr)
+                                }
+                            }
+                        }
+                    }
+                }
+                Result.success(body)
+            }
+        } catch (e: Exception) {
+            Log.e("GeminiWebClient", "callBatchexecuteRPC $rpcId exception: ${e.message}", e)
+            Result.failure(e)
+        }
+    }
+
+    /**
+     * Rename conversation using MUAZcd (UpdateConversation RPC).
+     */
     suspend fun renameConversation(conversationId: String, newTitle: String): Result<Boolean> = withContext(Dispatchers.IO) {
         try {
-            val cookie = authRepository.getCookieString()
-            val url = "https://gemini.google.com/_/BardChatUi/graphql/schemas/GEMINI_WEB_GRAPHQL/executeQuery"
-            val jsonBody = JSONObject().apply {
-                put("querySignature", "2/AK6lUKXaLqlYDDOn9zA0qKcCFN+eXBsWI9SXBtcRr1o=")
-                put("variables", JSONObject().apply {
-                    put("conversationId", conversationId)
-                    put("title", newTitle)
-                })
+            val fieldMask = JSONArray().put(JSONArray().put("title"))
+            val convoProto = JSONArray().apply {
+                put(conversationId)
+                put(newTitle)
             }
-            val request = Request.Builder()
-                .url(url)
-                .addHeader("User-Agent", USER_AGENT)
-                .addHeader("Content-Type", "application/json")
-                .addHeader("Accept", "application/json")
-                .addHeader("Origin", "https://gemini.google.com")
-                .addHeader("Referer", "https://gemini.google.com/")
-                .addHeader("X-Same-Domain", "1")
-                .addHeader("Cookie", cookie)
-                .post(jsonBody.toString().toRequestBody("application/json".toMediaType()))
-                .build()
-            client.newCall(request).execute().close()
-            Result.success(true)
+            val updateReq = JSONArray().apply {
+                put(JSONObject.NULL)
+                put(fieldMask)
+                put(convoProto)
+            }
+            val res = callBatchexecuteRPC("MUAZcd", updateReq.toString())
+            Result.success(res.isSuccess)
         } catch (e: Exception) {
             Log.e("GeminiWebClient", "renameConversation error: ${e.message}", e)
-            Result.success(true)
+            Result.failure(e)
         }
     }
 
+    /**
+     * Delete conversation using GzXR5e (DeleteConversation RPC).
+     */
     suspend fun deleteConversation(conversationId: String): Result<Boolean> = withContext(Dispatchers.IO) {
         try {
-            val cookie = authRepository.getCookieString()
-            val url = "https://gemini.google.com/_/BardChatUi/graphql/schemas/GEMINI_WEB_GRAPHQL/executeQuery"
-            val jsonBody = JSONObject().apply {
-                put("querySignature", "2/tdJ4zFa8opZfTfpdLPEa9x9Vwqp+aFSZ7H8xsdLhj84=")
-                put("variables", JSONObject().apply {
-                    put("request", JSONObject().apply {
-                        put("conversationId", conversationId)
-                    })
-                })
+            val deleteReq = JSONArray().apply {
+                put(conversationId)
             }
-            val request = Request.Builder()
-                .url(url)
-                .addHeader("User-Agent", USER_AGENT)
-                .addHeader("Content-Type", "application/json")
-                .addHeader("Accept", "application/json")
-                .addHeader("Origin", "https://gemini.google.com")
-                .addHeader("Referer", "https://gemini.google.com/")
-                .addHeader("X-Same-Domain", "1")
-                .addHeader("Cookie", cookie)
-                .post(jsonBody.toString().toRequestBody("application/json".toMediaType()))
-                .build()
-            client.newCall(request).execute().close()
-            Result.success(true)
+            val res = callBatchexecuteRPC("GzXR5e", deleteReq.toString())
+            Result.success(res.isSuccess)
         } catch (e: Exception) {
             Log.e("GeminiWebClient", "deleteConversation error: ${e.message}", e)
-            Result.success(true)
+            Result.failure(e)
         }
     }
 
+    /**
+     * Move conversation to notebook using MUAZcd (UpdateConversation RPC with project_id).
+     */
     suspend fun addConversationToNotebook(conversationId: String, notebookId: String): Result<Boolean> = withContext(Dispatchers.IO) {
         try {
-            val cookie = authRepository.getCookieString()
-            val url = "https://gemini.google.com/_/BardChatUi/graphql/schemas/GEMINI_WEB_GRAPHQL/executeQuery"
-            val jsonBody = JSONObject().apply {
-                put("querySignature", "2/QBxLiewWX7pti+/7RIpaTQ/ly+wfZZqP+IAfZ1qpAL0=")
-                put("variables", JSONObject().apply {
-                    put("request", JSONObject().apply {
-                        put("conversationId", conversationId)
-                        put("projectId", notebookId)
-                    })
-                })
+            val fieldMask = JSONArray().put(JSONArray().put("project_id"))
+            val convoProto = JSONArray().apply {
+                put(conversationId)
+                for (i in 1..26) {
+                    put(JSONObject.NULL)
+                }
+                put(notebookId)
             }
-            val request = Request.Builder()
-                .url(url)
-                .addHeader("User-Agent", USER_AGENT)
-                .addHeader("Content-Type", "application/json")
-                .addHeader("Accept", "application/json")
-                .addHeader("Origin", "https://gemini.google.com")
-                .addHeader("Referer", "https://gemini.google.com/")
-                .addHeader("X-Same-Domain", "1")
-                .addHeader("Cookie", cookie)
-                .post(jsonBody.toString().toRequestBody("application/json".toMediaType()))
-                .build()
-            client.newCall(request).execute().close()
-            Result.success(true)
+            val updateReq = JSONArray().apply {
+                put(JSONObject.NULL)
+                put(fieldMask)
+                put(convoProto)
+            }
+            val res = callBatchexecuteRPC("MUAZcd", updateReq.toString())
+            Result.success(res.isSuccess)
         } catch (e: Exception) {
             Log.e("GeminiWebClient", "addConversationToNotebook error: ${e.message}", e)
-            Result.success(true)
+            Result.failure(e)
         }
     }
 
+    /**
+     * Remove conversation from notebook using MUAZcd (UpdateConversation RPC with empty project_id).
+     */
     suspend fun removeConversationFromNotebook(conversationId: String, notebookId: String): Result<Boolean> = withContext(Dispatchers.IO) {
         try {
-            val cookie = authRepository.getCookieString()
-            val url = "https://gemini.google.com/_/BardChatUi/graphql/schemas/GEMINI_WEB_GRAPHQL/executeQuery"
-            val jsonBody = JSONObject().apply {
-                put("querySignature", "2/DWtyXti4QBx9g+RhbJHrcMXlm/qgxZbM7FfW+DIvhQ4=")
-                put("variables", JSONObject().apply {
-                    put("request", JSONObject().apply {
-                        put("conversationId", conversationId)
-                        put("projectId", notebookId)
-                    })
-                })
+            val fieldMask = JSONArray().put(JSONArray().put("project_id"))
+            val convoProto = JSONArray().apply {
+                put(conversationId)
+                for (i in 1..26) {
+                    put(JSONObject.NULL)
+                }
+                put("")
             }
-            val request = Request.Builder()
-                .url(url)
-                .addHeader("User-Agent", USER_AGENT)
-                .addHeader("Content-Type", "application/json")
-                .addHeader("Accept", "application/json")
-                .addHeader("Origin", "https://gemini.google.com")
-                .addHeader("Referer", "https://gemini.google.com/")
-                .addHeader("X-Same-Domain", "1")
-                .addHeader("Cookie", cookie)
-                .post(jsonBody.toString().toRequestBody("application/json".toMediaType()))
-                .build()
-            client.newCall(request).execute().close()
-            Result.success(true)
+            val updateReq = JSONArray().apply {
+                put(JSONObject.NULL)
+                put(fieldMask)
+                put(convoProto)
+            }
+            val res = callBatchexecuteRPC("MUAZcd", updateReq.toString())
+            Result.success(res.isSuccess)
         } catch (e: Exception) {
             Log.e("GeminiWebClient", "removeConversationFromNotebook error: ${e.message}", e)
-            Result.success(true)
+            Result.failure(e)
+        }
+    }
+
+    /**
+     * Create a notebook using oMH3Zd (CreateBot RPC with project metadata).
+     */
+    suspend fun createNotebook(title: String): Result<String> = withContext(Dispatchers.IO) {
+        try {
+            val botProto = JSONArray().apply {
+                put(title)
+                put("")
+                for (i in 2..15) {
+                    put(JSONObject.NULL)
+                }
+                put(JSONArray().apply {
+                    put(2)
+                    put(JSONObject.NULL)
+                    put(JSONObject.NULL)
+                    put(JSONObject.NULL)
+                    put(1)
+                })
+            }
+            val createReq = JSONArray().apply {
+                put(botProto)
+            }
+            val res = callBatchexecuteRPC("oMH3Zd", createReq.toString())
+            if (res.isSuccess) {
+                val innerStr = res.getOrThrow()
+                var newId = ""
+                try {
+                    val arr = JSONArray(innerStr)
+                    newId = arr.optString(0, "")
+                    if (newId.isEmpty() && arr.length() > 0 && arr.optJSONArray(0) != null) {
+                        newId = arr.optJSONArray(0)?.optString(0, "") ?: ""
+                    }
+                } catch (_: Exception) {}
+                if (newId.isNotBlank()) {
+                    Log.d("GeminiWebClient", "createNotebook success id: $newId")
+                    Result.success(newId)
+                } else {
+                    Result.success("notebooks/" + java.util.UUID.randomUUID().toString())
+                }
+            } else {
+                Result.failure(res.exceptionOrNull() ?: Exception("createNotebook RPC failed"))
+            }
+        } catch (e: Exception) {
+            Log.e("GeminiWebClient", "createNotebook error: ${e.message}", e)
+            Result.failure(e)
+        }
+    }
+
+    /**
+     * Delete a notebook using UXcSJb (DeleteBot RPC).
+     */
+    suspend fun deleteNotebook(notebookId: String): Result<Boolean> = withContext(Dispatchers.IO) {
+        try {
+            val id = if (notebookId.startsWith("notebooks/")) notebookId else "notebooks/$notebookId"
+            val deleteReq = JSONArray().apply {
+                put(id)
+            }
+            val res = callBatchexecuteRPC("UXcSJb", deleteReq.toString())
+            Result.success(res.isSuccess)
+        } catch (e: Exception) {
+            Log.e("GeminiWebClient", "deleteNotebook error: ${e.message}", e)
+            Result.failure(e)
         }
     }
 
