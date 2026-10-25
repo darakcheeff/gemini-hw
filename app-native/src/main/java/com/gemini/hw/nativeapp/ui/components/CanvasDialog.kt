@@ -148,6 +148,27 @@ fun CanvasDialog(
                     if (selectedTab == 0) {
                         val isHtml = content.contains("<html", ignoreCase = true) || document.language == "html"
                         if (isHtml) {
+                            val preparedHtml = remember(content) {
+                                var html = content
+                                if (html.contains(".slide-container") && !html.contains(".slide-container:first-of-type")) {
+                                    val styleInject = "<style>.slide-container:first-of-type { opacity: 1 !important; pointer-events: auto !important; }</style>"
+                                    html = if (html.contains("</head>", ignoreCase = true)) {
+                                        html.replaceFirst("</head>", "$styleInject</head>")
+                                    } else {
+                                        styleInject + html
+                                    }
+                                }
+                                if (html.contains("initializeSlideshowUi()")) {
+                                    html = html.replace(
+                                        "document.addEventListener('DOMContentLoaded', async function() {",
+                                        "function startSlideshowNow() { try { initializeSlideshowUi(); } catch(e){} }\n" +
+                                        "if (document.readyState === 'loading') { document.addEventListener('DOMContentLoaded', startSlideshowNow); } else { startSlideshowNow(); }\n" +
+                                        "document.addEventListener('DOMContentLoaded', async function() {"
+                                    )
+                                }
+                                html
+                            }
+
                             androidx.compose.ui.viewinterop.AndroidView(
                                 factory = { ctx ->
                                     android.webkit.WebView(ctx).apply {
@@ -155,12 +176,13 @@ fun CanvasDialog(
                                         settings.domStorageEnabled = true
                                         settings.useWideViewPort = true
                                         settings.loadWithOverviewMode = true
+                                        settings.mixedContentMode = android.webkit.WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
                                         setBackgroundColor(android.graphics.Color.parseColor("#1E1F20"))
-                                        loadDataWithBaseURL("https://gemini.google.com", content, "text/html", "UTF-8", null)
+                                        loadDataWithBaseURL("https://gemini.google.com", preparedHtml, "text/html", "UTF-8", null)
                                     }
                                 },
                                 update = { webView ->
-                                    webView.loadDataWithBaseURL("https://gemini.google.com", content, "text/html", "UTF-8", null)
+                                    webView.loadDataWithBaseURL("https://gemini.google.com", preparedHtml, "text/html", "UTF-8", null)
                                 },
                                 modifier = Modifier.fillMaxSize()
                             )

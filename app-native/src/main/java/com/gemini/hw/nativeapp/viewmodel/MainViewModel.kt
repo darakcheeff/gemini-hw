@@ -32,6 +32,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val _currentNotebook = MutableStateFlow<Notebook?>(null)
     val currentNotebook: StateFlow<Notebook?> = _currentNotebook.asStateFlow()
 
+    private val _conversationNotebookMap = java.util.concurrent.ConcurrentHashMap<String, String>()
+    private val _customConvoTitles = java.util.concurrent.ConcurrentHashMap<String, String>()
+
     private val _conversations = MutableStateFlow<List<Conversation>>(emptyList())
     val conversations: StateFlow<List<Conversation>> = _conversations.asStateFlow()
 
@@ -173,7 +176,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             val convoResult = client.getConversations()
             if (convoResult.isSuccess) {
-                _conversations.value = convoResult.getOrThrow()
+                val serverList = convoResult.getOrThrow()
+                _conversations.value = serverList.map { serverConvo ->
+                    val mappedNb = _conversationNotebookMap[serverConvo.id] ?: serverConvo.notebookId
+                    val customTitle = _customConvoTitles[serverConvo.id]
+                    serverConvo.copy(
+                        notebookId = mappedNb,
+                        title = if (!customTitle.isNullOrBlank()) customTitle else serverConvo.title
+                    )
+                }
             }
         }
     }
@@ -218,21 +229,42 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun loadNotebookConversations(notebookId: String) {
         val targetId = if (notebookId.startsWith("notebooks/")) notebookId else "notebooks/$notebookId"
+        val rawId = targetId.removePrefix("notebooks/")
         viewModelScope.launch {
             _isRefreshingNotebook.value = true
-            val res = client.getNotebookConversations(targetId)
-            if (res.isSuccess) {
-                val list = res.getOrThrow()
-                _notebookConversations.value = _notebookConversations.value + (targetId to list)
+            val localConvos = _conversations.value.filter {
+                it.notebookId == targetId || it.notebookId == rawId ||
+                _conversationNotebookMap[it.id] == targetId || _conversationNotebookMap[it.id] == rawId
             }
+            val existing = _notebookConversations.value[targetId] ?: _notebookConversations.value[rawId] ?: emptyList()
+            val combined = (localConvos + existing).distinctBy { it.id }
+            _notebookConversations.value = _notebookConversations.value + (targetId to combined) + (rawId to combined)
+
+            try {
+                val res = client.getNotebookConversations(targetId)
+                if (res.isSuccess) {
+                    val serverList = res.getOrThrow()
+                    val merged = (serverList + localConvos).distinctBy { it.id }
+                    _notebookConversations.value = _notebookConversations.value + (targetId to merged) + (rawId to merged)
+                }
+            } catch (_: Exception) {}
             _isRefreshingNotebook.value = false
         }
     }
 
     fun getNotebookConversations(notebookId: String): List<Conversation> {
         val targetId = if (notebookId.startsWith("notebooks/")) notebookId else "notebooks/$notebookId"
-        val loaded = _notebookConversations.value[targetId]
-        if (loaded != null) return loaded
+        val rawId = targetId.removePrefix("notebooks/")
+        val loaded = _notebookConversations.value[targetId] ?: _notebookConversations.value[rawId]
+        if (loaded != null && loaded.isNotEmpty()) return loaded
+        val local = _conversations.value.filter {
+            it.notebookId == targetId || it.notebookId == rawId ||
+            _conversationNotebookMap[it.id] == targetId || _conversationNotebookMap[it.id] == rawId
+        }
+        if (local.isNotEmpty()) {
+            _notebookConversations.value = _notebookConversations.value + (targetId to local) + (rawId to local)
+            return local
+        }
         loadNotebookConversations(targetId)
         return emptyList()
     }
@@ -245,59 +277,97 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             _currentNotebook.value = _currentNotebook.value?.copy(title = trimmed)
         }
         viewModelScope.launch {
-            client.renameNotebook(notebookId, trimmed)
+            try { client.renameNotebook(notebookId, trimmed) } catch (_: Exception) {}
             refreshNotebooks()
         }
     }
 
     fun deleteNotebook(notebookId: String) {
-        removeNotebook(notebookId)
+        val targetNorm = if (notebookId.startsWith("notebooks/")) notebookId else "notebooks/$notebookId"
+        val rawId = targetNorm.removePrefix("notebooks/")
+        gemsAndSparkRepo.removeNotebook(notebookId)
+        gemsAndSparkRepo.removeNotebook(targetNorm)
+        gemsAndSparkRepo.removeNotebook(rawId)
+        if (_currentNotebook.value?.id == notebookId || _currentNotebook.value?.id == targetNorm || _currentNotebook.value?.id == rawId) {
+            _currentNotebook.value = null
+        }
+        _notebookConversations.value = _notebookConversations.value.filterKeys {
+            it != notebookId && it != targetNorm && it != rawId
+        }
+        viewModelScope.launch {
+            try { client.deleteNotebook(notebookId) } catch (_: Exception) {}
+            refreshNotebooks()
+        }
     }
 
     fun moveConversationToNotebook(conversationId: String, targetNotebookId: String) {
         val targetNorm = if (targetNotebookId.startsWith("notebooks/")) targetNotebookId else "notebooks/$targetNotebookId"
+        val rawId = targetNorm.removePrefix("notebooks/")
+        _conversationNotebookMap[conversationId] = targetNorm
+        var movedConvo: Conversation? = null
         _conversations.value = _conversations.value.map {
-            if (it.id == conversationId) it.copy(notebookId = targetNorm) else it
+            if (it.id == conversationId) {
+                val updated = it.copy(notebookId = targetNorm)
+                movedConvo = updated
+                updated
+            } else it
+        }
+        if (movedConvo != null) {
+            val cur = _notebookConversations.value[targetNorm] ?: _notebookConversations.value[rawId] ?: emptyList()
+            val updatedList = (listOf(movedConvo!!) + cur).distinctBy { it.id }
+            _notebookConversations.value = _notebookConversations.value + (targetNorm to updatedList) + (rawId to updatedList)
         }
         viewModelScope.launch {
-            client.addConversationToNotebook(conversationId, targetNorm)
+            try { client.addConversationToNotebook(conversationId, targetNorm) } catch (_: Exception) {}
             loadNotebookConversations(targetNorm)
-            refreshConversations()
         }
     }
 
     fun removeConversationFromNotebook(conversationId: String, notebookId: String) {
         val targetNorm = if (notebookId.startsWith("notebooks/")) notebookId else "notebooks/$notebookId"
+        val rawId = targetNorm.removePrefix("notebooks/")
+        _conversationNotebookMap.remove(conversationId)
         _conversations.value = _conversations.value.map {
             if (it.id == conversationId) it.copy(notebookId = null) else it
         }
+        _notebookConversations.value = _notebookConversations.value.mapValues { (k, list) ->
+            if (k == targetNorm || k == rawId) list.filter { it.id != conversationId } else list
+        }
         viewModelScope.launch {
-            client.removeConversationFromNotebook(conversationId, targetNorm)
+            try { client.removeConversationFromNotebook(conversationId, targetNorm) } catch (_: Exception) {}
             loadNotebookConversations(targetNorm)
-            refreshConversations()
         }
     }
 
     fun renameConversation(conversationId: String, newTitle: String) {
         if (newTitle.isBlank()) return
         val trimmed = newTitle.trim()
+        _customConvoTitles[conversationId] = trimmed
         _conversations.value = _conversations.value.map {
             if (it.id == conversationId) it.copy(title = trimmed) else it
         }
+        _notebookConversations.value = _notebookConversations.value.mapValues { (_, list) ->
+            list.map { if (it.id == conversationId) it.copy(title = trimmed) else it }
+        }
         viewModelScope.launch {
-            client.renameConversation(conversationId, trimmed)
+            try { client.renameConversation(conversationId, trimmed) } catch (_: Exception) {}
             refreshConversations()
         }
     }
 
     fun deleteConversation(conversationId: String) {
+        _conversationNotebookMap.remove(conversationId)
+        _customConvoTitles.remove(conversationId)
         _conversations.value = _conversations.value.filter { it.id != conversationId }
+        _notebookConversations.value = _notebookConversations.value.mapValues { (_, list) ->
+            list.filter { it.id != conversationId }
+        }
         if (_currentConversationId.value == conversationId) {
             _currentConversationId.value = null
             _messages.value = emptyList()
         }
         viewModelScope.launch {
-            client.deleteConversation(conversationId)
+            try { client.deleteConversation(conversationId) } catch (_: Exception) {}
             refreshConversations()
         }
     }
@@ -593,6 +663,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     text = fullResponse
                 )
                 _messages.value = _messages.value + modelMsg
+                val finalConvoId = _currentConversationId.value
+                if (!finalConvoId.isNullOrBlank()) {
+                    try {
+                        val historyRes = client.getConversationMessages(finalConvoId)
+                        if (historyRes.isSuccess && historyRes.getOrThrow().isNotEmpty()) {
+                            _messages.value = historyRes.getOrThrow()
+                        }
+                    } catch (_: Exception) {}
+                }
                 refreshConversations()
                 onDone(fullResponse)
             } catch (e: Exception) {

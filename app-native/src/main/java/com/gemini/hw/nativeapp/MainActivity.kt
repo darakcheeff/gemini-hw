@@ -45,6 +45,12 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
+import androidx.compose.ui.input.nestedscroll.NestedScrollSource
+import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.Velocity
 import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
 import com.gemini.hw.core.model.*
@@ -1113,7 +1119,8 @@ fun MainScreen(
         NotebooksDialog(
             notebooks = notebooks,
             onAddNotebook = { title, content -> viewModel.addNotebook(title, content) },
-            onRemoveNotebook = { id -> viewModel.removeNotebook(id) },
+            onRemoveNotebook = { id -> viewModel.deleteNotebook(id) },
+            onRenameNotebook = { id, newTitle -> viewModel.renameNotebook(id, newTitle) },
             onSelectNotebook = { nb ->
                 viewModel.openNotebook(nb)
                 showNotebooksDialog = false
@@ -1373,114 +1380,189 @@ fun NotebookView(
         }
     }
 
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(horizontal = 16.dp, vertical = 8.dp)
-    ) {
-        if (isRefreshing) {
-            LinearProgressIndicator(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(3.dp),
-                color = MaterialTheme.colorScheme.primary
-            )
-            Spacer(modifier = Modifier.height(4.dp))
-        }
+    var pullDistance by remember { mutableFloatStateOf(0f) }
+    val density = LocalDensity.current
+    val maxPullPx = with(density) { 100.dp.toPx() }
+    val triggerPx = with(density) { 60.dp.toPx() }
 
-        // --- Top Row: Emoji, Title and "Добавить источники" Button ---
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(top = 8.dp, bottom = 16.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween
-        ) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier.weight(1f, fill = false)
-            ) {
-                Text(
-                    text = emoji,
-                    fontSize = 28.sp,
-                    modifier = Modifier.padding(end = 10.dp)
-                )
-                Text(
-                    text = notebook.title,
-                    style = MaterialTheme.typography.headlineMedium.copy(
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 24.sp
-                    ),
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    color = MaterialTheme.colorScheme.onBackground
-                )
+    val nestedScrollConnection = remember {
+        object : NestedScrollConnection {
+            override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
+                if (pullDistance > 0 && available.y < 0) {
+                    val consumed = available.y.coerceAtLeast(-pullDistance)
+                    pullDistance += consumed
+                    return Offset(0f, consumed)
+                }
+                return Offset.Zero
             }
 
-            Spacer(modifier = Modifier.width(8.dp))
+            override fun onPostScroll(
+                consumed: Offset,
+                available: Offset,
+                source: NestedScrollSource
+            ): Offset {
+                if (source == NestedScrollSource.Drag && available.y > 0) {
+                    val newDist = (pullDistance + available.y * 0.5f).coerceAtMost(maxPullPx)
+                    val diff = newDist - pullDistance
+                    pullDistance = newDist
+                    return Offset(0f, diff)
+                }
+                return Offset.Zero
+            }
 
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Surface(
-                    onClick = onAddSourcesClick,
-                    shape = RoundedCornerShape(20.dp),
-                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.7f),
-                    modifier = Modifier.height(38.dp)
+            override suspend fun onPreFling(available: Velocity): Velocity {
+                if (pullDistance >= triggerPx) {
+                    onRefresh()
+                }
+                pullDistance = 0f
+                return Velocity.Zero
+            }
+        }
+    }
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .nestedScroll(nestedScrollConnection)
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(horizontal = 16.dp, vertical = 8.dp)
+        ) {
+            if (isRefreshing || pullDistance > 0f) {
+                LinearProgressIndicator(
+                    progress = { if (isRefreshing) 0.7f else (pullDistance / triggerPx).coerceIn(0f, 1f) },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(4.dp),
+                    color = MaterialTheme.colorScheme.primary
+                )
+                Spacer(modifier = Modifier.height(4.dp))
+            }
+
+            // --- Top Row: Emoji, Title and Action Buttons ---
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 8.dp, bottom = 16.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.weight(1f, fill = false)
                 ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier.padding(horizontal = 12.dp)
-                    ) {
-                        Icon(
-                            Icons.Default.Add,
-                            contentDescription = null,
-                            modifier = Modifier.size(18.dp),
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text(
-                            "Добавить источники",
-                            style = MaterialTheme.typography.labelLarge,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
+                    Text(
+                        text = emoji,
+                        fontSize = 28.sp,
+                        modifier = Modifier.padding(end = 10.dp)
+                    )
+                    Text(
+                        text = notebook.title,
+                        style = MaterialTheme.typography.headlineMedium.copy(
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 24.sp
+                        ),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        color = MaterialTheme.colorScheme.onBackground
+                    )
                 }
 
-                Spacer(modifier = Modifier.width(4.dp))
+                Spacer(modifier = Modifier.width(8.dp))
 
-                Box {
+                Row(verticalAlignment = Alignment.CenterVertically) {
                     IconButton(
-                        onClick = { showNotebookMenu = true },
-                        modifier = Modifier.size(38.dp)
+                        onClick = onRefresh,
+                        modifier = Modifier.size(36.dp)
                     ) {
-                        Icon(Icons.Default.MoreVert, contentDescription = "Меню блокнота")
+                        Icon(Icons.Default.Refresh, contentDescription = "Обновить блокнот", tint = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
 
-                    DropdownMenu(
-                        expanded = showNotebookMenu,
-                        onDismissRequest = { showNotebookMenu = false }
+                    IconButton(
+                        onClick = { showRenameDialog = true },
+                        modifier = Modifier.size(36.dp)
                     ) {
-                        DropdownMenuItem(
-                            text = { Text("Обновить") },
-                            leadingIcon = { Icon(Icons.Default.Refresh, contentDescription = null) },
-                            onClick = {
-                                showNotebookMenu = false
-                                onRefresh()
-                            }
-                        )
-                        DropdownMenuItem(
-                            text = { Text("Переименовать") },
-                            leadingIcon = { Icon(Icons.Default.Edit, contentDescription = null) },
-                            onClick = {
-                                showNotebookMenu = false
-                                showRenameDialog = true
-                            }
-                        )
-                        DropdownMenuItem(
-                            text = { Text("Удалить", color = MaterialTheme.colorScheme.error) },
-                            leadingIcon = { Icon(Icons.Default.Delete, contentDescription = null, tint = MaterialTheme.colorScheme.error) },
-                            onClick = {
-                                showNotebookMenu = false
-                                showDeleteDialog = true
+                        Icon(Icons.Default.Edit, contentDescription = "Переименовать блокнот", tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+
+                    IconButton(
+                        onClick = { showDeleteDialog = true },
+                        modifier = Modifier.size(36.dp)
+                    ) {
+                        Icon(Icons.Default.Delete, contentDescription = "Удалить блокнот", tint = MaterialTheme.colorScheme.error)
+                    }
+
+                    Spacer(modifier = Modifier.width(4.dp))
+
+                    Surface(
+                        onClick = onAddSourcesClick,
+                        shape = RoundedCornerShape(20.dp),
+                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.7f),
+                        modifier = Modifier.height(38.dp)
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.padding(horizontal = 10.dp)
+                        ) {
+                            Icon(
+                                Icons.Default.Add,
+                                contentDescription = null,
+                                modifier = Modifier.size(18.dp),
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text(
+                                "Источники",
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.width(4.dp))
+
+                    Box {
+                        IconButton(
+                            onClick = { showNotebookMenu = true },
+                            modifier = Modifier.size(36.dp)
+                        ) {
+                            Icon(Icons.Default.MoreVert, contentDescription = "Меню блокнота")
+                        }
+
+                        DropdownMenu(
+                            expanded = showNotebookMenu,
+                            onDismissRequest = { showNotebookMenu = false }
+                        ) {
+                            DropdownMenuItem(
+                                text = { Text("Обновить") },
+                                leadingIcon = { Icon(Icons.Default.Refresh, contentDescription = null) },
+                                onClick = {
+                                    showNotebookMenu = false
+                                    onRefresh()
+                                }
+                            )
+                            DropdownMenuItem(
+                                text = { Text("Переименовать") },
+                                leadingIcon = { Icon(Icons.Default.Edit, contentDescription = null) },
+                                onClick = {
+                                    showNotebookMenu = false
+                                    showRenameDialog = true
+                                }
+                            )
+                            DropdownMenuItem(
+                                text = { Text("Удалить", color = MaterialTheme.colorScheme.error) },
+                                leadingIcon = { Icon(Icons.Default.Delete, contentDescription = null, tint = MaterialTheme.colorScheme.error) },
+                                onClick = {
+                                    showNotebookMenu = false
+                                    showDeleteDialog = true
+                                }
+                            )
+                        }
+                    }
+                }
+            }
                             }
                         )
                     }
@@ -1709,6 +1791,7 @@ fun NotebookView(
             }
         }
     }
+}
 }
 
 @Composable

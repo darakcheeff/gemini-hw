@@ -7,6 +7,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.MenuBook
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -20,12 +21,49 @@ fun NotebooksDialog(
     notebooks: List<Notebook>,
     onAddNotebook: (title: String, content: String) -> Unit,
     onRemoveNotebook: (id: String) -> Unit,
+    onRenameNotebook: (id: String, newTitle: String) -> Unit = { _, _ -> },
     onSelectNotebook: (Notebook) -> Unit,
     onDismiss: () -> Unit
 ) {
     var showCreateDialog by remember { mutableStateOf(false) }
     var newTitle by remember { mutableStateOf("") }
     var newContent by remember { mutableStateOf("") }
+
+    var notebookToRename by remember { mutableStateOf<Notebook?>(null) }
+    var renameTitle by remember { mutableStateOf("") }
+
+    if (notebookToRename != null) {
+        AlertDialog(
+            onDismissRequest = { notebookToRename = null },
+            title = { Text("Переименовать блокнот") },
+            text = {
+                OutlinedTextField(
+                    value = renameTitle,
+                    onValueChange = { renameTitle = it },
+                    label = { Text("Название блокнота") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        if (renameTitle.isNotBlank()) {
+                            onRenameNotebook(notebookToRename!!.id, renameTitle.trim())
+                            notebookToRename = null
+                        }
+                    }
+                ) {
+                    Text("Сохранить")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { notebookToRename = null }) {
+                    Text("Отмена")
+                }
+            }
+        )
+    }
 
     if (showCreateDialog) {
         AlertDialog(
@@ -130,8 +168,16 @@ fun NotebooksDialog(
                                         )
                                     }
                                 }
-                                IconButton(onClick = { onRemoveNotebook(nb.id) }) {
-                                    Icon(Icons.Default.Delete, contentDescription = "Удалить", tint = MaterialTheme.colorScheme.error)
+                                Row {
+                                    IconButton(onClick = {
+                                        renameTitle = nb.title
+                                        notebookToRename = nb
+                                    }) {
+                                        Icon(Icons.Default.Edit, contentDescription = "Переименовать")
+                                    }
+                                    IconButton(onClick = { onRemoveNotebook(nb.id) }) {
+                                        Icon(Icons.Default.Delete, contentDescription = "Удалить", tint = MaterialTheme.colorScheme.error)
+                                    }
                                 }
                             }
                         }

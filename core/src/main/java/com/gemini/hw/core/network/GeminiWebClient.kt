@@ -36,6 +36,8 @@ class GeminiWebClient(
     var cachedPctx: String? = null
         internal set
 
+    val conversationContextMap = java.util.concurrent.ConcurrentHashMap<String, Pair<String?, String?>>()
+
     private var reqIdCounter = 100000
 
     private fun nextReqId(): Int {
@@ -249,11 +251,29 @@ class GeminiWebClient(
             put(JSONObject.NULL)
         }
 
+        val ctx = if (!conversationId.isNullOrBlank()) conversationContextMap[conversationId] else null
+        val contextArr = if (ctx != null && !ctx.first.isNullOrBlank()) {
+            JSONArray().apply {
+                put(conversationId)
+                put(ctx.first)
+                if (!ctx.second.isNullOrBlank()) put(ctx.second)
+            }
+        } else if (!conversationId.isNullOrBlank()) {
+            JSONArray().apply {
+                put(conversationId)
+            }
+        } else null
+
         val msgStruct = JSONArray().apply {
             put(promptArr)
+            put(JSONArray().put("ru"))
+            if (contextArr != null) {
+                put(contextArr)
+            }
             if (!notebookId.isNullOrBlank()) {
                 val targetId = if (notebookId.startsWith("notebooks/")) notebookId else "notebooks/$notebookId"
-                for (i in 1..18) {
+                val startIdx = if (contextArr != null) 3 else 2
+                for (i in startIdx..18) {
                     put(JSONObject.NULL)
                 }
                 put(targetId) // field 20: projectId
@@ -331,10 +351,15 @@ class GeminiWebClient(
                         if (innerStr.isNotBlank()) {
                             val innerData = JSONArray(innerStr)
                             val convoInfo = innerData.optJSONArray(1)
+                            val candidates = innerData.optJSONArray(4)
                             if (convoInfo != null && convoInfo.length() > 0) {
                                 currentConvoId = convoInfo.optString(0, currentConvoId)
+                                val respId = convoInfo.optString(1, "")
+                                val choiceId = candidates?.optJSONArray(0)?.optString(0, "") ?: ""
+                                if (currentConvoId.isNotBlank() && (respId.isNotBlank() || choiceId.isNotBlank())) {
+                                    conversationContextMap[currentConvoId] = Pair(respId.ifBlank { null }, choiceId.ifBlank { null })
+                                }
                             }
-                            val candidates = innerData.optJSONArray(4)
                             if (candidates != null && candidates.length() > 0) {
                                 val firstCandidate = candidates.optJSONArray(0)
                                 val textParts = firstCandidate?.optJSONArray(1)
@@ -386,7 +411,12 @@ class GeminiWebClient(
                                         val docId = cItem.optString(0, "canvas_${System.currentTimeMillis()}")
                                         val docTitle = cItem.optString(2, "Документ Canvas")
                                         val docFileName = cItem.optString(9, "")
-                                        val docContent = cItem.optJSONArray(19)?.optString(0, "") ?: ""
+                                        val docArr = cItem.optJSONArray(19)
+                                        val docContent = if (docArr != null && docArr.length() > 0) {
+                                            docArr.optString(docArr.length() - 1, "")
+                                        } else {
+                                            cItem.optString(19, "")
+                                        }
                                         if (docContent.isNotBlank()) {
                                             canvasDoc = CanvasDocument(
                                                 id = docId,
@@ -778,33 +808,56 @@ class GeminiWebClient(
                                             turns = candidate
                                         }
                                     }
+                                    val lastTurn = turns.optJSONArray(0)
+                                    val lastRespId = lastTurn?.optJSONArray(0)?.optString(1) ?: lastTurn?.optJSONArray(0)?.optString(0)
+                                    val lastCand = lastTurn?.optJSONArray(3)?.optJSONArray(0)?.optJSONArray(0)?.optString(0)
+                                    if (!conversationId.isNullOrBlank() && (lastRespId != null || lastCand != null)) {
+                                        conversationContextMap[conversationId] = Pair(lastRespId, lastCand)
+                                    }
+
                                     for (t in (turns.length() - 1) downTo 0) {
                                         val turn = turns.optJSONArray(t) ?: continue
                                         val turnId = turn.optJSONArray(0)?.optString(1)
                                             ?: turn.optJSONArray(0)?.optString(0)
                                             ?: turn.optString(0, "turn_$t")
 
+                                        // Check turn[3][1] for user speech transcription from Google server
+                                        val modelData = turn.optJSONArray(3)
+                                        var userTranscription = ""
+                                        if (modelData != null && modelData.length() > 1) {
+                                            val transArr = modelData.optJSONArray(1)
+                                            val t1 = transArr?.optJSONArray(0)?.optString(0, "") ?: ""
+                                            if (t1.isNotBlank()) {
+                                                userTranscription = t1
+                                            }
+                                        }
+
                                         // User text
                                         var userText = ""
-                                        for (idx in listOf(2, 1, 3)) {
+                                        for (idx in listOf(2, 1)) {
                                             val userArr = turn.optJSONArray(idx)
                                             val t1 = userArr?.optJSONArray(0)?.optString(0, "") ?: ""
                                             val t2 = if (t1.isEmpty()) userArr?.optString(0, "") ?: "" else t1
-                                            if (t2.isNotBlank()) {
+                                            if (t2.isNotBlank() && !t2.startsWith("Ты собеседник в режиме живого разговора")) {
                                                 userText = t2
                                                 break
                                             }
                                         }
-                                        if (userText.isNotBlank()) {
-                                            chronologicalList.add(
-                                                ChatMessage(
-                                                    id = "u_$turnId",
-                                                    conversationId = conversationId,
-                                                    role = MessageRole.USER,
-                                                    text = userText
-                                                )
-                                            )
+
+                                        val finalUserText = when {
+                                            userTranscription.isNotBlank() -> userTranscription
+                                            userText.isNotBlank() -> userText
+                                            else -> "🎤 [Голосовой разговор]"
                                         }
+
+                                        chronologicalList.add(
+                                            ChatMessage(
+                                                id = "u_$turnId",
+                                                conversationId = conversationId,
+                                                role = MessageRole.USER,
+                                                text = finalUserText
+                                            )
+                                        )
 
                                          // Model response
                                         var modelText = ""
@@ -822,7 +875,12 @@ class GeminiWebClient(
                                                             val docId = cItem.optString(0, "canvas_$turnId")
                                                             val docTitle = cItem.optString(2, "Документ Canvas")
                                                             val docFileName = cItem.optString(9, "")
-                                                            val docContent = cItem.optJSONArray(19)?.optString(0, "") ?: ""
+                                                            val docArr = cItem.optJSONArray(19)
+                                        val docContent = if (docArr != null && docArr.length() > 0) {
+                                            docArr.optString(docArr.length() - 1, "")
+                                        } else {
+                                            cItem.optString(19, "")
+                                        }
                                                             if (docContent.isNotBlank()) {
                                                                 canvasDoc = CanvasDocument(
                                                                     id = docId,

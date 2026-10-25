@@ -18,6 +18,8 @@ class GemsAndSparkRepository {
     private val _notebooks = MutableStateFlow<List<Notebook>>(emptyList())
     val notebooks: StateFlow<List<Notebook>> = _notebooks.asStateFlow()
 
+    private val _renamedTitles = mutableMapOf<String, String>()
+
     fun setGems(list: List<Gem>) {
         _gems.value = list
     }
@@ -26,7 +28,11 @@ class GemsAndSparkRepository {
         val currentLocal = _notebooks.value.filter { it.id.startsWith("nb_") }
         val serverIds = list.map { it.id }.toSet()
         val keptLocal = currentLocal.filter { it.id !in serverIds }
-        _notebooks.value = list + keptLocal
+        val mergedList = (list + keptLocal).map { nb ->
+            val renamed = _renamedTitles[nb.id]
+            if (renamed != null) nb.copy(title = renamed) else nb
+        }
+        _notebooks.value = mergedList
     }
 
     fun addNotebook(title: String, content: String = "", id: String? = null): Notebook {
@@ -40,10 +46,12 @@ class GemsAndSparkRepository {
     }
 
     fun removeNotebook(id: String) {
+        _renamedTitles.remove(id)
         _notebooks.value = _notebooks.value.filter { it.id != id }
     }
 
     fun renameNotebook(id: String, newTitle: String) {
+        _renamedTitles[id] = newTitle
         _notebooks.value = _notebooks.value.map {
             if (it.id == id) it.copy(title = newTitle) else it
         }

@@ -10,8 +10,9 @@
 *.apk
 *.aab
 *.mp4
+*.png
+*_dump.json
 resume
-1.png
 
 original_analysis/
 
