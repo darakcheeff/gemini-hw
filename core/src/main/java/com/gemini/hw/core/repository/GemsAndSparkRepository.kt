@@ -43,6 +43,12 @@ class GemsAndSparkRepository {
         _notebooks.value = _notebooks.value.filter { it.id != id }
     }
 
+    fun renameNotebook(id: String, newTitle: String) {
+        _notebooks.value = _notebooks.value.map {
+            if (it.id == id) it.copy(title = newTitle) else it
+        }
+    }
+
     private val _scheduledItems = MutableStateFlow<List<ScheduledItem>>(emptyList())
     val scheduledItems: StateFlow<List<ScheduledItem>> = _scheduledItems.asStateFlow()
 

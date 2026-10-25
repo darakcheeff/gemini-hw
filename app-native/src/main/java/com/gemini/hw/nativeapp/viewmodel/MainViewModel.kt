@@ -240,11 +240,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun renameNotebook(notebookId: String, newTitle: String) {
         val trimmed = newTitle.trim()
         if (trimmed.isBlank()) return
-        val currentList = notebooks.value
-        val updated = currentList.map {
-            if (it.id == notebookId) it.copy(title = trimmed) else it
-        }
-        gemsAndSparkRepo.saveNotebooks(updated)
+        gemsAndSparkRepo.renameNotebook(notebookId, trimmed)
         if (_currentNotebook.value?.id == notebookId) {
             _currentNotebook.value = _currentNotebook.value?.copy(title = trimmed)
         }
