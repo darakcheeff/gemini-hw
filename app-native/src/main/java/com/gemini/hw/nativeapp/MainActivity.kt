@@ -300,22 +300,7 @@ fun MainScreen(viewModel: MainViewModel) {
         contract = ActivityResultContracts.RequestPermission()
     ) { isGranted ->
         if (isGranted) {
-            voiceInputManager.startListening(
-                onPartialResult = { partial ->
-                    inputText = partial
-                },
-                onFinalResult = { final ->
-                    inputText = final
-                    isVoiceListening = false
-                },
-                onError = { err ->
-                    isVoiceListening = false
-                    Toast.makeText(context, err, Toast.LENGTH_SHORT).show()
-                },
-                onStateChange = { listening ->
-                    isVoiceListening = listening
-                }
-            )
+            Toast.makeText(context, "Разрешение на запись звука получено", Toast.LENGTH_SHORT).show()
         } else {
             Toast.makeText(context, "Требуется разрешение на запись звука", Toast.LENGTH_SHORT).show()
         }

@@ -343,12 +343,55 @@ class GeminiWebClient(
                                     fullTextBuilder.setLength(0)
                                     fullTextBuilder.append(replyChunk)
 
+                                    val generatedAttachments = mutableListOf<Attachment>()
+                                    val imgRegex = Regex("""https://[a-zA-Z0-9.\-_/]*googleusercontent\.com/[^\s\)\"\'\]]+""")
+                                    imgRegex.findAll(replyChunk).forEach { match ->
+                                        val u = match.value
+                                        if (generatedAttachments.none { it.url == u }) {
+                                            generatedAttachments.add(
+                                                Attachment(
+                                                    id = "gen_img_${System.currentTimeMillis()}_${generatedAttachments.size}",
+                                                    name = "Сгенерированное изображение",
+                                                    mimeType = "image/jpeg",
+                                                    url = u,
+                                                    isGenerated = true
+                                                )
+                                            )
+                                        }
+                                    }
+
+                                    fun inspectForImages(arr: JSONArray) {
+                                        for (idx in 0 until arr.length()) {
+                                            val item = arr.opt(idx)
+                                            if (item is String && (item.startsWith("http://") || item.startsWith("https://")) &&
+                                                (item.contains("googleusercontent.com") || item.endsWith(".jpg") || item.endsWith(".png") || item.endsWith(".webp"))) {
+                                                if (generatedAttachments.none { it.url == item }) {
+                                                    generatedAttachments.add(
+                                                        Attachment(
+                                                            id = "gen_img_${System.currentTimeMillis()}_${generatedAttachments.size}",
+                                                            name = "Сгенерированное изображение",
+                                                            mimeType = "image/jpeg",
+                                                            url = item,
+                                                            isGenerated = true
+                                                        )
+                                                    )
+                                                }
+                                            } else if (item is JSONArray) {
+                                                inspectForImages(item)
+                                            }
+                                        }
+                                    }
+                                    if (firstCandidate != null) {
+                                        inspectForImages(firstCandidate)
+                                    }
+
                                     emit(
                                         ChatMessage(
                                             id = messageId,
                                             conversationId = currentConvoId,
                                             role = MessageRole.MODEL,
-                                            text = fullTextBuilder.toString()
+                                            text = fullTextBuilder.toString(),
+                                            attachments = generatedAttachments
                                         )
                                     )
                                 }

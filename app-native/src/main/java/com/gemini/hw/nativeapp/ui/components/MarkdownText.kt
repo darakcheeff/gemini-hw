@@ -362,12 +362,20 @@ fun parseMarkdownBlocks(rawText: String): List<MarkdownBlock> {
             continue
         }
 
-        val imgMatch = Regex("""^!\[(.*?)\]\((https?://[^\)]+)\)$""").find(trimmed)
+        val imgMatch = Regex("""!\[(.*?)\]\((https?://[^\s\)]+)\)""").find(trimmed)
         if (imgMatch != null) {
             flushParagraph()
-            val alt = imgMatch.groupValues[1]
+            val alt = imgMatch.groupValues[1].ifBlank { "Изображение" }
             val url = imgMatch.groupValues[2]
             blocks.add(MarkdownBlock.Image(alt, url))
+            i++
+            continue
+        }
+
+        // Direct image link on a separate line
+        if (trimmed.startsWith("https://") && (trimmed.contains("googleusercontent.com") || trimmed.endsWith(".png") || trimmed.endsWith(".jpg") || trimmed.endsWith(".jpeg") || trimmed.endsWith(".webp"))) {
+            flushParagraph()
+            blocks.add(MarkdownBlock.Image("Изображение", trimmed))
             i++
             continue
         }

@@ -541,9 +541,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 client.sendMessageStream(
                     conversationId = _currentConversationId.value,
                     prompt = prompt,
-                    modelId = _selectedModel.value.id,
+                    modelId = _selectedModel.value?.id ?: "default",
                     attachments = listOf(att),
-                    notebookId = _activeNotebook.value?.id
+                    notebookId = _currentNotebook.value?.id
                 ).collect { chunk ->
                     if (chunk.text.isNotBlank()) {
                         fullResponse = chunk.text
