@@ -182,6 +182,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         _currentNotebook.value = notebook
         _currentConversationId.value = null
         _messages.value = emptyList()
+        loadNotebookConversations(notebook.id)
     }
 
     fun closeNotebook() {
@@ -209,30 +210,52 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         _messages.value = emptyList()
     }
 
+    private val _notebookConversations = MutableStateFlow<Map<String, List<Conversation>>>(emptyMap())
+    val notebookConversations: StateFlow<Map<String, List<Conversation>>> = _notebookConversations.asStateFlow()
+
+    private val _isRefreshingNotebook = MutableStateFlow(false)
+    val isRefreshingNotebook: StateFlow<Boolean> = _isRefreshingNotebook.asStateFlow()
+
+    fun loadNotebookConversations(notebookId: String) {
+        val targetId = if (notebookId.startsWith("notebooks/")) notebookId else "notebooks/$notebookId"
+        viewModelScope.launch {
+            _isRefreshingNotebook.value = true
+            val res = client.getNotebookConversations(targetId)
+            if (res.isSuccess) {
+                val list = res.getOrThrow()
+                _notebookConversations.value = _notebookConversations.value + (targetId to list)
+            }
+            _isRefreshingNotebook.value = false
+        }
+    }
+
     fun getNotebookConversations(notebookId: String): List<Conversation> {
-        val normId = notebookId.removePrefix("notebooks/").removePrefix("projects/")
-        val list = _conversations.value.filter {
-            val cNorm = it.notebookId?.removePrefix("notebooks/")?.removePrefix("projects/")
-            cNorm == normId
+        val targetId = if (notebookId.startsWith("notebooks/")) notebookId else "notebooks/$notebookId"
+        val loaded = _notebookConversations.value[targetId]
+        if (loaded != null) return loaded
+        loadNotebookConversations(targetId)
+        return emptyList()
+    }
+
+    fun renameNotebook(notebookId: String, newTitle: String) {
+        val trimmed = newTitle.trim()
+        if (trimmed.isBlank()) return
+        val currentList = notebooks.value
+        val updated = currentList.map {
+            if (it.id == notebookId) it.copy(title = trimmed) else it
         }
-        val nb = notebooks.value.firstOrNull { it.id.removePrefix("notebooks/").removePrefix("projects/") == normId }
-        if (nb?.title?.contains("китай", ignoreCase = true) == true && list.isEmpty()) {
-            return listOf(
-                Conversation(
-                    id = "c_china_1",
-                    title = "Заполнение анкеты для Китая",
-                    dateText = "3 окт.",
-                    notebookId = notebookId
-                ),
-                Conversation(
-                    id = "c_china_2",
-                    title = "2026. Чанша+Чжанцзяцзе+Улинъюань",
-                    dateText = "29 сент.",
-                    notebookId = notebookId
-                )
-            )
+        gemsAndSparkRepo.saveNotebooks(updated)
+        if (_currentNotebook.value?.id == notebookId) {
+            _currentNotebook.value = _currentNotebook.value?.copy(title = trimmed)
         }
-        return list
+        viewModelScope.launch {
+            client.renameNotebook(notebookId, trimmed)
+            refreshNotebooks()
+        }
+    }
+
+    fun deleteNotebook(notebookId: String) {
+        removeNotebook(notebookId)
     }
 
     fun moveConversationToNotebook(conversationId: String, targetNotebookId: String) {
@@ -242,16 +265,19 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
         viewModelScope.launch {
             client.addConversationToNotebook(conversationId, targetNorm)
+            loadNotebookConversations(targetNorm)
             refreshConversations()
         }
     }
 
     fun removeConversationFromNotebook(conversationId: String, notebookId: String) {
+        val targetNorm = if (notebookId.startsWith("notebooks/")) notebookId else "notebooks/$notebookId"
         _conversations.value = _conversations.value.map {
             if (it.id == conversationId) it.copy(notebookId = null) else it
         }
         viewModelScope.launch {
-            client.removeConversationFromNotebook(conversationId, notebookId)
+            client.removeConversationFromNotebook(conversationId, targetNorm)
+            loadNotebookConversations(targetNorm)
             refreshConversations()
         }
     }
@@ -410,8 +436,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     }
                 }
 
-                // If Canvas Mode is enabled and model returned code or structured document, pop up Canvas automatically!
-                if (_isCanvasMode.value && lastResponseText.isNotBlank()) {
+                // If message contains a Canvas document, or Canvas Mode is enabled and model returned code or structured document, pop up Canvas automatically!
+                val lastMsg = _messages.value.lastOrNull { it.role == MessageRole.MODEL }
+                if (lastMsg?.canvas != null) {
+                    _activeCanvas.value = lastMsg.canvas
+                } else if (_isCanvasMode.value && lastResponseText.isNotBlank()) {
                     val codeMatch = Regex("""```([a-zA-Z0-9_\-+]*)\n([\s\S]*?)```""").find(lastResponseText)
                     if (codeMatch != null) {
                         val lang = codeMatch.groupValues[1]
@@ -518,6 +547,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         onError: (String) -> Unit
     ) {
         viewModelScope.launch {
+            val userMsg = ChatMessage(
+                id = "live_u_" + System.currentTimeMillis(),
+                conversationId = _currentConversationId.value ?: "new",
+                role = MessageRole.USER,
+                text = "🎤 [Голосовой разговор]"
+            )
+            _messages.value = _messages.value + userMsg
+
             try {
                 val bytes = audioFile.readBytes()
                 val uploadRes = client.uploadFile(bytes, "live_voice.m4a", "audio/mp4")
@@ -545,11 +582,22 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     attachments = listOf(att),
                     notebookId = _currentNotebook.value?.id
                 ).collect { chunk ->
+                    if (chunk.conversationId.isNotBlank() && _currentConversationId.value != chunk.conversationId) {
+                        _currentConversationId.value = chunk.conversationId
+                    }
                     if (chunk.text.isNotBlank()) {
                         fullResponse = chunk.text
                         onStreamingChunk(fullResponse)
                     }
                 }
+                val modelMsg = ChatMessage(
+                    id = "live_m_" + System.currentTimeMillis(),
+                    conversationId = _currentConversationId.value ?: "new",
+                    role = MessageRole.MODEL,
+                    text = fullResponse
+                )
+                _messages.value = _messages.value + modelMsg
+                refreshConversations()
                 onDone(fullResponse)
             } catch (e: Exception) {
                 onError(e.message ?: "Ошибка")

@@ -378,7 +378,27 @@ class GeminiWebClient(
                                     )
                                 }
 
-                                if (replyChunk.isNotBlank()) {
+                                var canvasDoc: CanvasDocument? = null
+                                val cand30 = firstCandidate?.optJSONArray(30)
+                                if (cand30 != null && cand30.length() > 0) {
+                                    val cItem = cand30.optJSONArray(0)
+                                    if (cItem != null) {
+                                        val docId = cItem.optString(0, "canvas_${System.currentTimeMillis()}")
+                                        val docTitle = cItem.optString(2, "Документ Canvas")
+                                        val docFileName = cItem.optString(9, "")
+                                        val docContent = cItem.optJSONArray(19)?.optString(0, "") ?: ""
+                                        if (docContent.isNotBlank()) {
+                                            canvasDoc = CanvasDocument(
+                                                id = docId,
+                                                title = docTitle,
+                                                content = docContent,
+                                                language = if (docFileName.endsWith(".html") || docContent.contains("<html", ignoreCase = true)) "html" else "markdown"
+                                            )
+                                        }
+                                    }
+                                }
+
+                                if (replyChunk.isNotBlank() || canvasDoc != null) {
                                     fullTextBuilder.setLength(0)
                                     fullTextBuilder.append(replyChunk)
 
@@ -388,7 +408,8 @@ class GeminiWebClient(
                                             conversationId = currentConvoId,
                                             role = MessageRole.MODEL,
                                             text = fullTextBuilder.toString(),
-                                            attachments = generatedAttachments
+                                            attachments = generatedAttachments,
+                                            canvas = canvasDoc
                                         )
                                     )
                                 }
@@ -403,7 +424,7 @@ class GeminiWebClient(
     }.flowOn(Dispatchers.IO)
 
     /**
-     * Load recent conversation list from Gemini Web using MaZiqc RPC.
+     * Load conversation list from Gemini Web using MaZiqc RPC with pagination support.
      */
     suspend fun getConversations(): Result<List<Conversation>> = withContext(Dispatchers.IO) {
         try {
@@ -415,11 +436,83 @@ class GeminiWebClient(
             val fsid = cachedFdrFJe ?: ""
             val bl = cachedBuildLabel ?: "boq_gemini-web-uiserver_20261023.01_p0"
 
-            val fReq = "[[[\"MaZiqc\",\"[50,null,[0,null,1]]\",null,\"generic\"]]]"
+            val allConvos = mutableListOf<Conversation>()
+            var continuationToken: String? = null
+
+            // Fetch page 1
+            val fReq1 = "[[[\"MaZiqc\",\"[50,null,[0,null,1]]\",null,\"generic\"]]]"
+            val postData1 = "f.req=" + URLEncoder.encode(fReq1, "UTF-8") + "&at=" + URLEncoder.encode(snlm0e, "UTF-8")
+            val url1 = "$BATCH_EXECUTE_URL?rpcids=MaZiqc&f.sid=$fsid&bl=$bl&hl=ru&_reqid=${nextReqId()}&rt=c"
+
+            val (page1Convos, nextToken) = fetchMaZiqcPage(url1, postData1, cookie)
+            allConvos.addAll(page1Convos)
+            continuationToken = nextToken
+
+            // If there are more conversations, fetch page 2 (to cover all 85+ chats)
+            if (!continuationToken.isNullOrBlank()) {
+                val fReq2 = "[[[\"MaZiqc\",\"[50,\\\"${continuationToken.replace("\"", "\\\"")}\\\",[0,null,1]]\",null,\"generic\"]]]"
+                val postData2 = "f.req=" + URLEncoder.encode(fReq2, "UTF-8") + "&at=" + URLEncoder.encode(snlm0e, "UTF-8")
+                val url2 = "$BATCH_EXECUTE_URL?rpcids=MaZiqc&f.sid=$fsid&bl=$bl&hl=ru&_reqid=${nextReqId()}&rt=c"
+                val (page2Convos, _) = fetchMaZiqcPage(url2, postData2, cookie)
+                allConvos.addAll(page2Convos)
+            }
+
+            Log.d("GeminiWebClient", "getConversations total parsed across pages: ${allConvos.size}")
+            Result.success(allConvos)
+        } catch (e: Exception) {
+            Log.e("GeminiWebClient", "getConversations failed: ${e.message}", e)
+            Result.failure(e)
+        }
+    }
+
+    private fun fetchMaZiqcPage(url: String, postData: String, cookie: String): Pair<List<Conversation>, String?> {
+        val request = Request.Builder()
+            .url(url)
+            .addHeader("User-Agent", USER_AGENT)
+            .addHeader("Content-Type", "application/x-www-form-urlencoded;charset=UTF-8")
+            .addHeader("Origin", "https://gemini.google.com")
+            .addHeader("Referer", "https://gemini.google.com/")
+            .addHeader("X-Same-Domain", "1")
+            .addHeader("Cookie", cookie)
+            .post(postData.toRequestBody("application/x-www-form-urlencoded;charset=UTF-8".toMediaType()))
+            .build()
+
+        client.newCall(request).execute().use { response ->
+            if (!response.isSuccessful) return Pair(emptyList(), null)
+            val body = response.body?.string() ?: ""
+            return parseConversationsWithToken(body)
+        }
+    }
+
+    /**
+     * Load conversations inside a specific notebook using MaZiqc RPC with notebookId filter.
+     */
+    suspend fun getNotebookConversations(notebookId: String): Result<List<Conversation>> = withContext(Dispatchers.IO) {
+        try {
+            if (cachedSnlm0e.isNullOrBlank()) {
+                refreshTokensAndFetchModels()
+            }
+            val snlm0e = cachedSnlm0e ?: authRepository.getSnlm0eToken() ?: ""
+            val cookie = authRepository.getCookieString()
+            val fsid = cachedFdrFJe ?: ""
+            val bl = cachedBuildLabel ?: "boq_gemini-web-uiserver_20261023.01_p0"
+
+            val targetId = if (notebookId.startsWith("notebooks/")) notebookId else "notebooks/$notebookId"
+            val payload = JSONArray().apply {
+                put(50)
+                put(JSONObject.NULL)
+                put(JSONArray().apply {
+                    put(0)
+                    put(JSONObject.NULL)
+                    put(1)
+                    put(targetId)
+                })
+            }
+            val fReq = "[[[\"MaZiqc\",\"${payload.toString().replace("\"", "\\\"")}\",null,\"generic\"]]]"
             val postData = "f.req=" + URLEncoder.encode(fReq, "UTF-8") + "&at=" + URLEncoder.encode(snlm0e, "UTF-8")
             val url = "$BATCH_EXECUTE_URL?rpcids=MaZiqc&f.sid=$fsid&bl=$bl&hl=ru&_reqid=${nextReqId()}&rt=c"
 
-            Log.d("GeminiWebClient", "getConversations calling URL: $url")
+            Log.d("GeminiWebClient", "getNotebookConversations calling URL: $url for $targetId")
 
             val request = Request.Builder()
                 .url(url)
@@ -433,23 +526,71 @@ class GeminiWebClient(
                 .build()
 
             client.newCall(request).execute().use { response ->
-                Log.d("GeminiWebClient", "getConversations responseCode: ${response.code}")
                 if (!response.isSuccessful) {
                     return@withContext Result.failure(Exception("HTTP ${response.code}"))
                 }
                 val body = response.body?.string() ?: ""
-                val convos = parseConversationsFromBody(body)
+                val (convos, _) = parseConversationsWithToken(body, defaultNotebookId = targetId)
+                Log.d("GeminiWebClient", "getNotebookConversations parsed ${convos.size} convos for $targetId")
                 Result.success(convos)
             }
         } catch (e: Exception) {
-            Log.e("GeminiWebClient", "getConversations failed: ${e.message}", e)
+            Log.e("GeminiWebClient", "getNotebookConversations error: ${e.message}", e)
             Result.failure(e)
         }
     }
 
-    internal fun parseConversationsFromBody(body: String): List<Conversation> {
+    /**
+     * Rename a notebook using kHv0Vd (UpdateBot RPC).
+     */
+    suspend fun renameNotebook(notebookId: String, newTitle: String): Result<Boolean> = withContext(Dispatchers.IO) {
+        try {
+            val targetId = if (notebookId.startsWith("notebooks/")) notebookId else "notebooks/$notebookId"
+            val botProto = JSONArray().apply {
+                put(targetId)
+                put(newTitle)
+                put("")
+                put("")
+                for (i in 4..8) put(JSONObject.NULL)
+                put(0)
+                put(JSONObject.NULL)
+                put(1)
+                put(JSONObject.NULL)
+                put(JSONObject.NULL)
+                put(JSONObject.NULL)
+                put(JSONArray())
+            }
+            val updateReq = JSONArray().apply {
+                put(botProto)
+            }
+            val res = callBatchexecuteRPC("kHv0Vd", updateReq.toString())
+            Result.success(res.isSuccess)
+        } catch (e: Exception) {
+            Log.e("GeminiWebClient", "renameNotebook error: ${e.message}", e)
+            Result.failure(e)
+        }
+    }
+
+    internal fun parseConversationsWithToken(body: String, defaultNotebookId: String? = null): Pair<List<Conversation>, String?> {
         val result = mutableListOf<Conversation>()
         val seenIds = mutableSetOf<String>()
+        var continuationToken: String? = null
+
+        fun formatTimestamp(seconds: Long): String {
+            if (seconds <= 0) return ""
+            return try {
+                val now = System.currentTimeMillis()
+                val msgTime = seconds * 1000L
+                val diffDays = (now - msgTime) / (1000 * 60 * 60 * 24)
+                when {
+                    diffDays <= 0 -> "Сегодня"
+                    diffDays == 1L -> "Вчера"
+                    else -> java.text.SimpleDateFormat("d MMM", java.util.Locale("ru")).format(java.util.Date(msgTime))
+                }
+            } catch (_: Exception) {
+                ""
+            }
+        }
 
         fun inspectArray(arr: JSONArray) {
             for (i in 0 until arr.length()) {
@@ -461,19 +602,26 @@ class GeminiWebClient(
                         val finalId = if (id.startsWith("c_")) id else "c_$id"
                         if (finalId !in seenIds) {
                             seenIds.add(finalId)
-                            var projectRef: String? = null
-                            for (idx in 0 until sub.length()) {
-                                val cand = sub.optString(idx, "")
-                                if (cand.startsWith("notebooks/") || cand.startsWith("projects/") || cand.startsWith("nb_")) {
-                                    projectRef = cand
-                                    break
+                            var projectRef: String? = defaultNotebookId
+                            if (projectRef == null) {
+                                for (idx in 0 until sub.length()) {
+                                    val cand = sub.optString(idx, "")
+                                    if (cand.startsWith("notebooks/") || cand.startsWith("projects/") || cand.startsWith("nb_")) {
+                                        projectRef = cand
+                                        break
+                                    }
                                 }
                             }
+                            val timeArr = sub.optJSONArray(5)
+                            val timeSec = timeArr?.optLong(0, 0L) ?: 0L
+                            val dateLabel = formatTimestamp(timeSec)
+
                             result.add(
                                 Conversation(
                                     id = finalId,
                                     title = title.ifBlank { "Новый чат" },
-                                    notebookId = projectRef
+                                    notebookId = projectRef,
+                                    dateText = dateLabel.ifBlank { null }
                                 )
                             )
                         }
@@ -485,7 +633,6 @@ class GeminiWebClient(
         }
 
         try {
-            Log.d("GeminiWebClient", "parseConversationsFromBody body len=${body.length}")
             for (line in body.split("\n")) {
                 if (line.contains("MaZiqc") && line.contains("wrb.fr")) {
                     val start = line.indexOf("[")
@@ -496,9 +643,13 @@ class GeminiWebClient(
                             if (chunk.optString(0) == "wrb.fr" && chunk.optString(1) == "MaZiqc") {
                                 val innerStr = chunk.optString(2, "")
                                 if (innerStr.isNotBlank() && innerStr != "null") {
-                                    Log.d("GeminiWebClient", "MaZiqc innerStr: ${innerStr.take(300)}")
                                     val innerData = JSONArray(innerStr)
-                                    inspectArray(innerData)
+                                    val token = innerData.optString(1, "")
+                                    if (token.isNotBlank() && token != "null") {
+                                        continuationToken = token
+                                    }
+                                    val convosArr = innerData.optJSONArray(2) ?: innerData
+                                    inspectArray(convosArr)
                                 }
                             }
                         }
@@ -506,10 +657,13 @@ class GeminiWebClient(
                 }
             }
         } catch (e: Exception) {
-            Log.e("GeminiWebClient", "parseConversationsFromBody error: ${e.message}", e)
+            Log.e("GeminiWebClient", "parseConversationsWithToken error: ${e.message}", e)
         }
-        Log.d("GeminiWebClient", "parseConversationsFromBody parsed ${result.size} convos")
-        return result
+        return Pair(result, continuationToken)
+    }
+
+    internal fun parseConversationsFromBody(body: String): List<Conversation> {
+        return parseConversationsWithToken(body).first
     }
 
     /**
@@ -652,14 +806,34 @@ class GeminiWebClient(
                                             )
                                         }
 
-                                        // Model response
+                                         // Model response
                                         var modelText = ""
+                                        var canvasDoc: CanvasDocument? = null
                                         for (idx in listOf(3, 2, 4)) {
                                             val cArr = turn.optJSONArray(idx)
                                             if (cArr != null) {
                                                 val candList = cArr.optJSONArray(0) ?: cArr
                                                 val firstCand = candList.optJSONArray(0)
                                                 if (firstCand != null) {
+                                                    val cand30 = firstCand.optJSONArray(30)
+                                                    if (cand30 != null && cand30.length() > 0) {
+                                                        val cItem = cand30.optJSONArray(0)
+                                                        if (cItem != null) {
+                                                            val docId = cItem.optString(0, "canvas_$turnId")
+                                                            val docTitle = cItem.optString(2, "Документ Canvas")
+                                                            val docFileName = cItem.optString(9, "")
+                                                            val docContent = cItem.optJSONArray(19)?.optString(0, "") ?: ""
+                                                            if (docContent.isNotBlank()) {
+                                                                canvasDoc = CanvasDocument(
+                                                                    id = docId,
+                                                                    title = docTitle,
+                                                                    content = docContent,
+                                                                    language = if (docFileName.endsWith(".html") || docContent.contains("<html", ignoreCase = true)) "html" else "markdown"
+                                                                )
+                                                            }
+                                                        }
+                                                    }
+
                                                     val parts = firstCand.optJSONArray(1)
                                                     val m1 = parts?.optJSONArray(0)?.optString(0, "") ?: ""
                                                     val m2 = if (m1.isEmpty()) parts?.optString(0, "") ?: "" else m1
@@ -678,13 +852,14 @@ class GeminiWebClient(
                                                 }
                                             }
                                         }
-                                        if (modelText.isNotBlank()) {
+                                        if (modelText.isNotBlank() || canvasDoc != null) {
                                             chronologicalList.add(
                                                 ChatMessage(
                                                     id = "m_$turnId",
                                                     conversationId = conversationId,
                                                     role = MessageRole.MODEL,
-                                                    text = modelText
+                                                    text = modelText,
+                                                    canvas = canvasDoc
                                                 )
                                             )
                                         }

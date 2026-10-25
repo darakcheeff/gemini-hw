@@ -143,19 +143,39 @@ fun CanvasDialog(
                         .weight(1f)
                         .clip(RoundedCornerShape(8.dp))
                         .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.25f))
-                        .padding(12.dp)
+                        .padding(if (content.contains("<html", ignoreCase = true)) 0.dp else 12.dp)
                 ) {
                     if (selectedTab == 0) {
-                        // Rich Markdown / Code Preview
-                        Column(
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .verticalScroll(rememberScrollState())
-                        ) {
-                            MarkdownText(
-                                text = content,
-                                color = MaterialTheme.colorScheme.onSurface
+                        val isHtml = content.contains("<html", ignoreCase = true) || document.language == "html"
+                        if (isHtml) {
+                            androidx.compose.ui.viewinterop.AndroidView(
+                                factory = { ctx ->
+                                    android.webkit.WebView(ctx).apply {
+                                        settings.javaScriptEnabled = true
+                                        settings.domStorageEnabled = true
+                                        settings.useWideViewPort = true
+                                        settings.loadWithOverviewMode = true
+                                        setBackgroundColor(android.graphics.Color.parseColor("#1E1F20"))
+                                        loadDataWithBaseURL("https://gemini.google.com", content, "text/html", "UTF-8", null)
+                                    }
+                                },
+                                update = { webView ->
+                                    webView.loadDataWithBaseURL("https://gemini.google.com", content, "text/html", "UTF-8", null)
+                                },
+                                modifier = Modifier.fillMaxSize()
                             )
+                        } else {
+                            // Rich Markdown / Code Preview
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .verticalScroll(rememberScrollState())
+                            ) {
+                                MarkdownText(
+                                    text = content,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                            }
                         }
                     } else {
                         // Editable Text Area

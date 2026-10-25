@@ -120,6 +120,9 @@ fun MainScreen(
     var selectedNotebookChatForMenu by remember { mutableStateOf<Conversation?>(null) }
     var convoToRename by remember { mutableStateOf<Conversation?>(null) }
     var convoToMoveToNotebook by remember { mutableStateOf<Conversation?>(null) }
+    var notebookToRename by remember { mutableStateOf<Notebook?>(null) }
+    var notebookToDelete by remember { mutableStateOf<Notebook?>(null) }
+    val speechToTextManager = remember { com.gemini.hw.nativeapp.audio.SpeechToTextManager(context) }
 
     androidx.activity.compose.BackHandler(enabled = currentNotebook != null) {
         if (currentConvoId != null || messages.isNotEmpty()) {
@@ -465,17 +468,49 @@ fun MainScreen(
                         )
                     }
                     if (notebooks.isNotEmpty()) {
-                        items(notebooks.take(4)) { nb ->
-                            NavigationDrawerItem(
-                                label = { Text(nb.title, maxLines = 1, overflow = TextOverflow.Ellipsis) },
-                                icon = { Icon(Icons.AutoMirrored.Filled.MenuBook, contentDescription = null) },
-                                selected = currentNotebook?.id == nb.id,
-                                onClick = {
-                                    coroutineScope.launch { drawerState.close() }
-                                    viewModel.openNotebook(nb)
-                                },
-                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 2.dp)
-                            )
+                        items(notebooks.take(8)) { nb ->
+                            var showItemMenu by remember { mutableStateOf(false) }
+                            Box(modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 2.dp)) {
+                                NavigationDrawerItem(
+                                    label = { Text(nb.title, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                                    icon = { Icon(Icons.AutoMirrored.Filled.MenuBook, contentDescription = null) },
+                                    badge = {
+                                        IconButton(
+                                            onClick = { showItemMenu = true },
+                                            modifier = Modifier.size(24.dp)
+                                        ) {
+                                            Icon(Icons.Default.MoreVert, contentDescription = "Меню", modifier = Modifier.size(16.dp))
+                                        }
+                                    },
+                                    selected = currentNotebook?.id == nb.id,
+                                    onClick = {
+                                        coroutineScope.launch { drawerState.close() }
+                                        viewModel.openNotebook(nb)
+                                    }
+                                )
+
+                                DropdownMenu(
+                                    expanded = showItemMenu,
+                                    onDismissRequest = { showItemMenu = false }
+                                ) {
+                                    DropdownMenuItem(
+                                        text = { Text("Переименовать") },
+                                        leadingIcon = { Icon(Icons.Default.Edit, contentDescription = null) },
+                                        onClick = {
+                                            showItemMenu = false
+                                            notebookToRename = nb
+                                        }
+                                    )
+                                    DropdownMenuItem(
+                                        text = { Text("Удалить", color = MaterialTheme.colorScheme.error) },
+                                        leadingIcon = { Icon(Icons.Default.Delete, contentDescription = null, tint = MaterialTheme.colorScheme.error) },
+                                        onClick = {
+                                            showItemMenu = false
+                                            notebookToDelete = nb
+                                        }
+                                    )
+                                }
+                            }
                         }
                     }
                     item {
@@ -683,9 +718,11 @@ fun MainScreen(
                     .background(MaterialTheme.colorScheme.background)
             ) {
                 if (currentNotebook != null && currentConvoId == null && messages.isEmpty()) {
-                    val notebookConvos = remember(currentNotebook, conversations) {
-                        viewModel.getNotebookConversations(currentNotebook!!.id)
-                    }
+                    val notebookConvosMap by viewModel.notebookConversations.collectAsState()
+                    val isRefreshingNb by viewModel.isRefreshingNotebook.collectAsState()
+                    val notebookConvos = notebookConvosMap[currentNotebook!!.id]
+                        ?: viewModel.getNotebookConversations(currentNotebook!!.id)
+
                     NotebookView(
                         notebook = currentNotebook!!,
                         conversations = notebookConvos,
@@ -693,6 +730,10 @@ fun MainScreen(
                         selectedModel = selectedModel,
                         thinkingLevel = thinkingLevel,
                         isLoading = isLoading,
+                        isRefreshing = isRefreshingNb,
+                        onRefresh = { viewModel.loadNotebookConversations(currentNotebook!!.id) },
+                        onRenameNotebook = { newTitle -> viewModel.renameNotebook(currentNotebook!!.id, newTitle) },
+                        onDeleteNotebook = { viewModel.deleteNotebook(currentNotebook!!.id) },
                         onModelSelected = { viewModel.selectModel(it) },
                         onThinkingLevelSelected = { viewModel.setThinkingLevel(it) },
                         onSelectConversation = { convoId ->
@@ -881,30 +922,23 @@ fun MainScreen(
                                 onClick = {
                                     if (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
                                         if (isVoiceListening) {
+                                            speechToTextManager.stopListening()
                                             isVoiceListening = false
-                                            val file = voiceInputManager.stopRecording()
-                                            if (file != null) {
-                                                Toast.makeText(context, "Распознавание речи...", Toast.LENGTH_SHORT).show()
-                                                viewModel.transcribeVoiceAudio(
-                                                    file = file,
-                                                    onResult = { text ->
-                                                        if (text.isNotBlank()) {
-                                                            inputText = if (inputText.isBlank()) text else "$inputText $text"
-                                                        }
-                                                    },
-                                                    onError = { err ->
-                                                        Toast.makeText(context, err, Toast.LENGTH_SHORT).show()
-                                                    }
-                                                )
-                                            }
                                         } else {
-                                            val ok = voiceInputManager.startRecording { err ->
-                                                Toast.makeText(context, err, Toast.LENGTH_SHORT).show()
-                                            }
-                                            if (ok) {
-                                                isVoiceListening = true
-                                                Toast.makeText(context, "Говорите... Нажмите снова для завершения", Toast.LENGTH_SHORT).show()
-                                            }
+                                            speechToTextManager.startListening(
+                                                onPartialText = { partial ->
+                                                    inputText = partial
+                                                },
+                                                onFinalText = { final ->
+                                                    inputText = final
+                                                    isVoiceListening = false
+                                                },
+                                                onError = { err ->
+                                                    isVoiceListening = false
+                                                    Toast.makeText(context, err, Toast.LENGTH_SHORT).show()
+                                                }
+                                            )
+                                            isVoiceListening = true
                                         }
                                     } else {
                                         permissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
@@ -915,23 +949,14 @@ fun MainScreen(
                                     .clip(CircleShape)
                                     .background(
                                         if (isVoiceListening) MaterialTheme.colorScheme.error 
-                                        else if (isTranscribing) MaterialTheme.colorScheme.tertiary 
                                         else MaterialTheme.colorScheme.surfaceVariant
                                     )
                             ) {
-                                if (isTranscribing) {
-                                    CircularProgressIndicator(
-                                        modifier = Modifier.size(20.dp),
-                                        strokeWidth = 2.dp,
-                                        color = MaterialTheme.colorScheme.onTertiary
-                                    )
-                                } else {
-                                    Icon(
-                                        if (isVoiceListening) Icons.Default.Stop else Icons.Default.Mic,
-                                        contentDescription = "Голосовой ввод",
-                                        tint = if (isVoiceListening) Color.White else MaterialTheme.colorScheme.onSurface
-                                    )
-                                }
+                                Icon(
+                                    if (isVoiceListening) Icons.Default.Stop else Icons.Default.Mic,
+                                    contentDescription = "Голосовой ввод",
+                                    tint = if (isVoiceListening) Color.White else MaterialTheme.colorScheme.onSurface
+                                )
                             }
 
                             IconButton(
@@ -1231,6 +1256,41 @@ fun MainScreen(
             }
         )
     }
+
+    notebookToRename?.let { nb ->
+        RenameDialog(
+            initialTitle = nb.title,
+            onDismiss = { notebookToRename = null },
+            onConfirm = { newTitle ->
+                viewModel.renameNotebook(nb.id, newTitle)
+                notebookToRename = null
+            }
+        )
+    }
+
+    notebookToDelete?.let { nb ->
+        AlertDialog(
+            onDismissRequest = { notebookToDelete = null },
+            title = { Text("Удалить блокнот?") },
+            text = { Text("Вы действительно хотите удалить блокнот «${nb.title}»?") },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        viewModel.deleteNotebook(nb.id)
+                        notebookToDelete = null
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
+                ) {
+                    Text("Удалить")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { notebookToDelete = null }) {
+                    Text("Отмена")
+                }
+            }
+        )
+    }
 }
 
 @OptIn(ExperimentalFoundationApi::class)
@@ -1242,6 +1302,10 @@ fun NotebookView(
     selectedModel: GeminiModel?,
     thinkingLevel: String,
     isLoading: Boolean,
+    isRefreshing: Boolean = false,
+    onRefresh: () -> Unit = {},
+    onRenameNotebook: (String) -> Unit = {},
+    onDeleteNotebook: () -> Unit = {},
     onModelSelected: (GeminiModel) -> Unit,
     onThinkingLevelSelected: (String) -> Unit,
     onSelectConversation: (String) -> Unit,
@@ -1251,14 +1315,51 @@ fun NotebookView(
 ) {
     var inputText by remember { mutableStateOf("") }
     var showModelMenu by remember { mutableStateOf(false) }
+    var showNotebookMenu by remember { mutableStateOf(false) }
+    var showRenameDialog by remember { mutableStateOf(false) }
+    var showDeleteDialog by remember { mutableStateOf(false) }
     val context = LocalContext.current
-    val nbVoiceManager = remember { com.gemini.hw.nativeapp.audio.VoiceInputManager(context) }
-    var isNbVoiceListening by remember { mutableStateOf(false) }
+    val speechToTextManager = remember { com.gemini.hw.nativeapp.audio.SpeechToTextManager(context) }
+    var isListeningVoice by remember { mutableStateOf(false) }
 
     DisposableEffect(Unit) {
         onDispose {
-            nbVoiceManager.cancelRecording()
+            speechToTextManager.stopListening()
         }
+    }
+
+    if (showRenameDialog) {
+        RenameDialog(
+            initialTitle = notebook.title,
+            onDismiss = { showRenameDialog = false },
+            onConfirm = { newTitle ->
+                onRenameNotebook(newTitle)
+            }
+        )
+    }
+
+    if (showDeleteDialog) {
+        AlertDialog(
+            onDismissRequest = { showDeleteDialog = false },
+            title = { Text("Удалить блокнот?") },
+            text = { Text("Вы действительно хотите удалить блокнот «${notebook.title}»?") },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        showDeleteDialog = false
+                        onDeleteNotebook()
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
+                ) {
+                    Text("Удалить")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDeleteDialog = false }) {
+                    Text("Отмена")
+                }
+            }
+        )
     }
 
     val emoji = remember(notebook.title) {
@@ -1277,6 +1378,16 @@ fun NotebookView(
             .fillMaxSize()
             .padding(horizontal = 16.dp, vertical = 8.dp)
     ) {
+        if (isRefreshing) {
+            LinearProgressIndicator(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(3.dp),
+                color = MaterialTheme.colorScheme.primary
+            )
+            Spacer(modifier = Modifier.height(4.dp))
+        }
+
         // --- Top Row: Emoji, Title and "Добавить источники" Button ---
         Row(
             modifier = Modifier
@@ -1308,28 +1419,71 @@ fun NotebookView(
 
             Spacer(modifier = Modifier.width(8.dp))
 
-            Surface(
-                onClick = onAddSourcesClick,
-                shape = RoundedCornerShape(20.dp),
-                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.7f),
-                modifier = Modifier.height(38.dp)
-            ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier.padding(horizontal = 12.dp)
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Surface(
+                    onClick = onAddSourcesClick,
+                    shape = RoundedCornerShape(20.dp),
+                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.7f),
+                    modifier = Modifier.height(38.dp)
                 ) {
-                    Icon(
-                        Icons.Default.Add,
-                        contentDescription = null,
-                        modifier = Modifier.size(18.dp),
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    Spacer(modifier = Modifier.width(4.dp))
-                    Text(
-                        "Добавить источники",
-                        style = MaterialTheme.typography.labelLarge,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.padding(horizontal = 12.dp)
+                    ) {
+                        Icon(
+                            Icons.Default.Add,
+                            contentDescription = null,
+                            modifier = Modifier.size(18.dp),
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text(
+                            "Добавить источники",
+                            style = MaterialTheme.typography.labelLarge,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.width(4.dp))
+
+                Box {
+                    IconButton(
+                        onClick = { showNotebookMenu = true },
+                        modifier = Modifier.size(38.dp)
+                    ) {
+                        Icon(Icons.Default.MoreVert, contentDescription = "Меню блокнота")
+                    }
+
+                    DropdownMenu(
+                        expanded = showNotebookMenu,
+                        onDismissRequest = { showNotebookMenu = false }
+                    ) {
+                        DropdownMenuItem(
+                            text = { Text("Обновить") },
+                            leadingIcon = { Icon(Icons.Default.Refresh, contentDescription = null) },
+                            onClick = {
+                                showNotebookMenu = false
+                                onRefresh()
+                            }
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Переименовать") },
+                            leadingIcon = { Icon(Icons.Default.Edit, contentDescription = null) },
+                            onClick = {
+                                showNotebookMenu = false
+                                showRenameDialog = true
+                            }
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Удалить", color = MaterialTheme.colorScheme.error) },
+                            leadingIcon = { Icon(Icons.Default.Delete, contentDescription = null, tint = MaterialTheme.colorScheme.error) },
+                            onClick = {
+                                showNotebookMenu = false
+                                showDeleteDialog = true
+                            }
+                        )
+                    }
                 }
             }
         }
@@ -1429,23 +1583,32 @@ fun NotebookView(
 
                 IconButton(
                     onClick = {
-                        if (isNbVoiceListening) {
-                            isNbVoiceListening = false
-                            val file = nbVoiceManager.stopRecording()
-                            if (file != null) {
-                                inputText = if (inputText.isBlank()) "Голосовая заметка" else "$inputText [голос]"
-                            }
+                        if (isListeningVoice) {
+                            speechToTextManager.stopListening()
+                            isListeningVoice = false
                         } else {
-                            val ok = nbVoiceManager.startRecording()
-                            if (ok) isNbVoiceListening = true
+                            speechToTextManager.startListening(
+                                onPartialText = { partial ->
+                                    inputText = partial
+                                },
+                                onFinalText = { final ->
+                                    inputText = final
+                                    isListeningVoice = false
+                                },
+                                onError = { err ->
+                                    isListeningVoice = false
+                                    android.widget.Toast.makeText(context, err, android.widget.Toast.LENGTH_SHORT).show()
+                                }
+                            )
+                            isListeningVoice = true
                         }
                     },
                     modifier = Modifier.size(36.dp)
                 ) {
                     Icon(
-                        if (isNbVoiceListening) Icons.Default.Stop else Icons.Default.Mic,
-                        contentDescription = "Голос",
-                        tint = if (isNbVoiceListening) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant
+                        if (isListeningVoice) Icons.Default.Stop else Icons.Default.Mic,
+                        contentDescription = "Голосовой ввод",
+                        tint = if (isListeningVoice) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
 
