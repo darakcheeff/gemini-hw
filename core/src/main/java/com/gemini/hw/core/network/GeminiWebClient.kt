@@ -338,52 +338,49 @@ class GeminiWebClient(
                             if (candidates != null && candidates.length() > 0) {
                                 val firstCandidate = candidates.optJSONArray(0)
                                 val textParts = firstCandidate?.optJSONArray(1)
-                                val replyChunk = textParts?.optString(0, "") ?: ""
-                                if (replyChunk.isNotBlank()) {
-                                    fullTextBuilder.setLength(0)
-                                    fullTextBuilder.append(replyChunk)
+                                var replyChunk = textParts?.optString(0, "") ?: ""
 
-                                    val generatedAttachments = mutableListOf<Attachment>()
-                                    val imgRegex = Regex("""https://[a-zA-Z0-9.\-_/]*googleusercontent\.com/[^\s\)\"\'\]]+""")
-                                    imgRegex.findAll(replyChunk).forEach { match ->
-                                        val u = match.value
-                                        if (generatedAttachments.none { it.url == u }) {
-                                            generatedAttachments.add(
-                                                Attachment(
-                                                    id = "gen_img_${System.currentTimeMillis()}_${generatedAttachments.size}",
-                                                    name = "Сгенерированное изображение",
-                                                    mimeType = "image/jpeg",
-                                                    url = u,
-                                                    isGenerated = true
-                                                )
-                                            )
+                                val generatedAttachments = mutableListOf<Attachment>()
+
+                                fun inspectForImages(obj: Any?) {
+                                    if (obj is JSONArray) {
+                                        for (idx in 0 until obj.length()) {
+                                            inspectForImages(obj.opt(idx))
                                         }
-                                    }
-
-                                    fun inspectForImages(arr: JSONArray) {
-                                        for (idx in 0 until arr.length()) {
-                                            val item = arr.opt(idx)
-                                            if (item is String && (item.startsWith("http://") || item.startsWith("https://")) &&
-                                                (item.contains("googleusercontent.com") || item.endsWith(".jpg") || item.endsWith(".png") || item.endsWith(".webp"))) {
-                                                if (generatedAttachments.none { it.url == item }) {
-                                                    generatedAttachments.add(
-                                                        Attachment(
-                                                            id = "gen_img_${System.currentTimeMillis()}_${generatedAttachments.size}",
-                                                            name = "Сгенерированное изображение",
-                                                            mimeType = "image/jpeg",
-                                                            url = item,
-                                                            isGenerated = true
-                                                        )
+                                    } else if (obj is String) {
+                                        if (obj.startsWith("https://lh3.googleusercontent.com/gg-dl/") ||
+                                            obj.startsWith("https://lh3.googleusercontent.com/") ||
+                                            obj.contains("work.fife.usercontent.google.com") ||
+                                            (obj.startsWith("https://") && (obj.endsWith(".jpg") || obj.endsWith(".png") || obj.endsWith(".jpeg") || obj.endsWith(".webp")))) {
+                                            if (generatedAttachments.none { it.url == obj }) {
+                                                generatedAttachments.add(
+                                                    Attachment(
+                                                        id = "gen_img_${System.currentTimeMillis()}_${generatedAttachments.size}",
+                                                        name = "Сгенерированное изображение",
+                                                        mimeType = "image/jpeg",
+                                                        url = obj,
+                                                        isGenerated = true
                                                     )
-                                                }
-                                            } else if (item is JSONArray) {
-                                                inspectForImages(item)
+                                                )
                                             }
                                         }
                                     }
-                                    if (firstCandidate != null) {
-                                        inspectForImages(firstCandidate)
-                                    }
+                                }
+                                if (firstCandidate != null) {
+                                    inspectForImages(firstCandidate)
+                                }
+
+                                val firstRealUrl = generatedAttachments.firstOrNull()?.url
+                                if (firstRealUrl != null && replyChunk.contains("image_generation_content")) {
+                                    replyChunk = replyChunk.replace(
+                                        Regex("""https?://googleusercontent\.com/image_generation_content/[^\s\)\"\'\]]+"""),
+                                        "![Сгенерированное изображение]($firstRealUrl)"
+                                    )
+                                }
+
+                                if (replyChunk.isNotBlank()) {
+                                    fullTextBuilder.setLength(0)
+                                    fullTextBuilder.append(replyChunk)
 
                                     emit(
                                         ChatMessage(
