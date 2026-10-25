@@ -1563,12 +1563,6 @@ fun NotebookView(
                     }
                 }
             }
-                            }
-                        )
-                    }
-                }
-            }
-        }
 
         // --- Search / Input Pill Container (matching 3.png) ---
         Surface(
@@ -1791,7 +1785,6 @@ fun NotebookView(
             }
         }
     }
-}
 }
 
 @Composable
