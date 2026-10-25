@@ -61,20 +61,33 @@ import kotlinx.coroutines.launch
 class MainActivity : ComponentActivity() {
 
     private val viewModel: MainViewModel by viewModels()
+    private val incomingIntent = mutableStateOf<Intent?>(null)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        incomingIntent.value = intent
         setContent {
+            val currentIntent by incomingIntent
             GeminiTheme {
-                MainScreen(viewModel)
+                MainScreen(viewModel, currentIntent) { incomingIntent.value = null }
             }
         }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        incomingIntent.value = intent
     }
 }
 
 @OptIn(ExperimentalFoundationApi::class, ExperimentalMaterial3Api::class)
 @Composable
-fun MainScreen(viewModel: MainViewModel) {
+fun MainScreen(
+    viewModel: MainViewModel,
+    incomingIntent: Intent? = null,
+    onIntentConsumed: () -> Unit = {}
+) {
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
     val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
@@ -257,9 +270,8 @@ fun MainScreen(viewModel: MainViewModel) {
         }
     }
 
-    val activity = context as? Activity
-    LaunchedEffect(activity?.intent) {
-        val actIntent = activity?.intent ?: return@LaunchedEffect
+    LaunchedEffect(incomingIntent) {
+        val actIntent = incomingIntent ?: return@LaunchedEffect
         val assistQuery = actIntent.getStringExtra(AssistantActivity.EXTRA_ASSISTANT_QUERY)
         val assistImageUri = actIntent.getStringExtra(AssistantActivity.EXTRA_ASSISTANT_IMAGE_URI)
         if (!assistQuery.isNullOrBlank()) {
@@ -274,8 +286,7 @@ fun MainScreen(viewModel: MainViewModel) {
                 )
             } else emptyList()
             viewModel.sendMessage(assistQuery, atts)
-            actIntent.removeExtra(AssistantActivity.EXTRA_ASSISTANT_QUERY)
-            actIntent.removeExtra(AssistantActivity.EXTRA_ASSISTANT_IMAGE_URI)
+            onIntentConsumed()
         } else if (actIntent.action == Intent.ACTION_SEND) {
             val text = actIntent.getStringExtra(Intent.EXTRA_TEXT)
             val uri = actIntent.getParcelableExtra<Uri>(Intent.EXTRA_STREAM)
@@ -292,7 +303,7 @@ fun MainScreen(viewModel: MainViewModel) {
             if (!text.isNullOrBlank() || atts.isNotEmpty()) {
                 viewModel.sendMessage(text ?: "Посмотри прикрепленный файл", atts)
             }
-            actIntent.action = null
+            onIntentConsumed()
         }
     }
 
