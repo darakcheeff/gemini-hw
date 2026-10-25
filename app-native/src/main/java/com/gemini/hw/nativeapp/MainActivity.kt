@@ -99,7 +99,11 @@ fun MainScreen(viewModel: MainViewModel) {
     var convoToMoveToNotebook by remember { mutableStateOf<Conversation?>(null) }
 
     androidx.activity.compose.BackHandler(enabled = currentNotebook != null) {
-        viewModel.closeNotebook()
+        if (currentConvoId != null || messages.isNotEmpty()) {
+            viewModel.closeNotebookChat()
+        } else {
+            viewModel.closeNotebook()
+        }
     }
 
     var inputText by remember { mutableStateOf("") }
@@ -391,8 +395,9 @@ fun MainScreen(viewModel: MainViewModel) {
                 TopAppBar(
                     title = {
                         if (currentNotebook != null) {
+                            val activeChatTitle = conversations.firstOrNull { it.id == currentConvoId }?.title
                             Text(
-                                currentNotebook!!.title,
+                                if (currentConvoId != null && !activeChatTitle.isNullOrBlank()) activeChatTitle else currentNotebook!!.title,
                                 style = MaterialTheme.typography.titleMedium,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis
@@ -409,7 +414,13 @@ fun MainScreen(viewModel: MainViewModel) {
                     },
                     navigationIcon = {
                         if (currentNotebook != null) {
-                            IconButton(onClick = { viewModel.closeNotebook() }) {
+                            IconButton(onClick = {
+                                if (currentConvoId != null || messages.isNotEmpty()) {
+                                    viewModel.closeNotebookChat()
+                                } else {
+                                    viewModel.closeNotebook()
+                                }
+                            }) {
                                 Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Назад")
                             }
                         } else {
@@ -437,7 +448,7 @@ fun MainScreen(viewModel: MainViewModel) {
                     .padding(paddingValues)
                     .background(MaterialTheme.colorScheme.background)
             ) {
-                if (currentNotebook != null) {
+                if (currentNotebook != null && currentConvoId == null && messages.isEmpty()) {
                     val notebookConvos = remember(currentNotebook, conversations) {
                         viewModel.getNotebookConversations(currentNotebook!!.id)
                     }
@@ -451,7 +462,7 @@ fun MainScreen(viewModel: MainViewModel) {
                         onModelSelected = { viewModel.selectModel(it) },
                         onThinkingLevelSelected = { viewModel.setThinkingLevel(it) },
                         onSelectConversation = { convoId ->
-                            viewModel.selectConversation(convoId)
+                            viewModel.openNotebookChat(currentNotebook!!, convoId)
                         },
                         onConversationLongClick = { convo ->
                             selectedNotebookChatForMenu = convo

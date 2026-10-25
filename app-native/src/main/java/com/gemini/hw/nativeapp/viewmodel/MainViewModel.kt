@@ -160,11 +160,36 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun closeNotebook() {
         _currentNotebook.value = null
+        _currentConversationId.value = null
+        _messages.value = emptyList()
+    }
+
+    fun openNotebookChat(notebook: Notebook, conversationId: String) {
+        _currentNotebook.value = notebook
+        _currentConversationId.value = conversationId
+        _messages.value = emptyList()
+        viewModelScope.launch {
+            _isLoading.value = true
+            val msgResult = client.getConversationMessages(conversationId)
+            if (msgResult.isSuccess) {
+                _messages.value = msgResult.getOrThrow()
+            }
+            _isLoading.value = false
+        }
+    }
+
+    fun closeNotebookChat() {
+        _currentConversationId.value = null
+        _messages.value = emptyList()
     }
 
     fun getNotebookConversations(notebookId: String): List<Conversation> {
-        val list = _conversations.value.filter { it.notebookId == notebookId }
-        val nb = notebooks.value.firstOrNull { it.id == notebookId }
+        val normId = notebookId.removePrefix("notebooks/").removePrefix("projects/")
+        val list = _conversations.value.filter {
+            val cNorm = it.notebookId?.removePrefix("notebooks/")?.removePrefix("projects/")
+            cNorm == normId
+        }
+        val nb = notebooks.value.firstOrNull { it.id.removePrefix("notebooks/").removePrefix("projects/") == normId }
         if (nb?.title?.contains("китай", ignoreCase = true) == true && list.isEmpty()) {
             return listOf(
                 Conversation(
@@ -185,11 +210,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun moveConversationToNotebook(conversationId: String, targetNotebookId: String) {
+        val targetNorm = if (targetNotebookId.startsWith("notebooks/")) targetNotebookId else "notebooks/$targetNotebookId"
         _conversations.value = _conversations.value.map {
-            if (it.id == conversationId) it.copy(notebookId = targetNotebookId) else it
+            if (it.id == conversationId) it.copy(notebookId = targetNorm) else it
         }
         viewModelScope.launch {
-            client.addConversationToNotebook(conversationId, targetNotebookId)
+            client.addConversationToNotebook(conversationId, targetNorm)
             refreshConversations()
         }
     }
@@ -219,7 +245,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun deleteConversation(conversationId: String) {
         _conversations.value = _conversations.value.filter { it.id != conversationId }
         if (_currentConversationId.value == conversationId) {
-            startNewChat()
+            _currentConversationId.value = null
+            _messages.value = emptyList()
         }
         viewModelScope.launch {
             client.deleteConversation(conversationId)
@@ -229,7 +256,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun startChatInNotebook(notebook: Notebook, prompt: String) {
         if (prompt.isBlank()) return
-        _currentNotebook.value = null
+        _currentNotebook.value = notebook
         _currentConversationId.value = null
         _messages.value = emptyList()
         sendMessage(prompt, targetNotebookId = notebook.id)
@@ -285,13 +312,17 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             val convoId = _currentConversationId.value
             val currentModel = _selectedModel.value
             val modelId = currentModel?.id ?: GeminiModel.MODEL_FLASH_3_8.id
+            val currentNotebookId = targetNotebookId
+                ?: _currentNotebook.value?.id
+                ?: _conversations.value.firstOrNull { it.id == convoId }?.notebookId
 
             try {
                 client.sendMessageStream(
                     conversationId = convoId,
                     prompt = prompt,
                     modelId = modelId,
-                    audioBytes = audioBytes
+                    audioBytes = audioBytes,
+                    notebookId = currentNotebookId
                 ).collect { responseMsg ->
                     val list = _messages.value.toMutableList()
                     val existingIndex = list.indexOfFirst { it.id == responseMsg.id }
@@ -303,9 +334,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     _messages.value = list
                     if (_currentConversationId.value == null) {
                         _currentConversationId.value = responseMsg.conversationId
-                        if (targetNotebookId != null) {
+                        if (currentNotebookId != null) {
                             viewModelScope.launch {
-                                client.addConversationToNotebook(responseMsg.conversationId, targetNotebookId)
+                                client.addConversationToNotebook(responseMsg.conversationId, currentNotebookId)
                                 refreshConversations()
                             }
                         }
