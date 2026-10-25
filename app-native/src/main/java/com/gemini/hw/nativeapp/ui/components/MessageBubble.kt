@@ -30,7 +30,9 @@ fun MessageBubble(
     message: ChatMessage,
     onEdit: (String) -> Unit,
     onBranch: () -> Unit,
-    onOpenCanvas: (CanvasDocument) -> Unit
+    onOpenCanvas: (CanvasDocument) -> Unit,
+    speakingMessageId: String? = null,
+    onToggleTts: ((ChatMessage) -> Unit)? = null
 ) {
     val context = LocalContext.current
     var isEditing by remember { mutableStateOf(false) }
@@ -51,7 +53,7 @@ fun MessageBubble(
     ) {
         Box(
             modifier = Modifier
-                .widthIn(max = 340.dp)
+                .then(if (isUser) Modifier.widthIn(max = 320.dp) else Modifier.fillMaxWidth())
                 .clip(RoundedCornerShape(12.dp))
                 .background(bubbleColor)
                 .padding(12.dp)
@@ -79,12 +81,21 @@ fun MessageBubble(
                         }
                     }
                 } else {
-                    // Message text
-                    Text(
+                    // Rich formatted markdown text
+                    MarkdownText(
                         text = message.text,
                         color = MaterialTheme.colorScheme.onSurface,
-                        fontSize = 15.sp,
-                        lineHeight = 22.sp
+                        isUser = isUser,
+                        onOpenCanvas = { code, lang ->
+                            onOpenCanvas(
+                                CanvasDocument(
+                                    id = "canvas_${message.id}",
+                                    title = "Код (${lang.ifBlank { "snippet" }})",
+                                    content = code,
+                                    language = lang
+                                )
+                            )
+                        }
                     )
 
                     // Attachments / Generated Images
@@ -163,6 +174,21 @@ fun MessageBubble(
                             contentDescription = "Редактировать",
                             modifier = Modifier.size(16.dp),
                             tint = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+
+                if (!isUser && onToggleTts != null) {
+                    val isSpeaking = speakingMessageId == message.id
+                    IconButton(
+                        onClick = { onToggleTts(message) },
+                        modifier = Modifier.size(28.dp)
+                    ) {
+                        Icon(
+                            if (isSpeaking) Icons.Default.Stop else Icons.Default.VolumeUp,
+                            contentDescription = if (isSpeaking) "Остановить" else "Озвучить",
+                            modifier = Modifier.size(16.dp),
+                            tint = if (isSpeaking) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
                 }

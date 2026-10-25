@@ -31,6 +31,10 @@ class GeminiWebClient(
         internal set
     var cachedBuildLabel: String? = null
         internal set
+    var cachedPushId: String? = null
+        internal set
+    var cachedPctx: String? = null
+        internal set
 
     private var reqIdCounter = 100000
 
@@ -98,6 +102,16 @@ class GeminiWebClient(
         val cfbMatcher = PATTERN_CFB2H.matcher(html)
         if (cfbMatcher.find()) {
             cachedBuildLabel = cfbMatcher.group(1)
+        }
+
+        val pushMatcher = PATTERN_PUSH_ID.matcher(html)
+        if (pushMatcher.find()) {
+            cachedPushId = pushMatcher.group(1)
+        }
+
+        val pctxMatcher = PATTERN_PCTX.matcher(html)
+        if (pctxMatcher.find()) {
+            cachedPctx = pctxMatcher.group(1)
         }
     }
 
@@ -197,17 +211,37 @@ class GeminiWebClient(
             put(prompt)
             put(0)
             put(if (conversationId.isNullOrBlank()) null else conversationId)
-            put(null)
-            put(null)
-            put(null)
-
-            if (audioBytes != null && audioBytes.isNotEmpty()) {
-                val audioObj = JSONObject().apply {
-                    put("mimeType", "audio/mp4")
-                    put("data", android.util.Base64.encodeToString(audioBytes, android.util.Base64.NO_WRAP))
+            if (attachments.isNotEmpty()) {
+                val refs = JSONArray()
+                for (att in attachments) {
+                    val refPath = att.url
+                    if (!refPath.isNullOrBlank()) {
+                        val kind = if (att.mimeType.startsWith("image/")) 1 else 3
+                        val meta = JSONArray().apply {
+                            put(refPath)
+                            put(kind)
+                            put(JSONObject.NULL)
+                            put(att.mimeType)
+                        }
+                        val item = JSONArray().apply {
+                            put(meta)
+                            put(att.name)
+                            for (i in 2..7) put(JSONObject.NULL)
+                            put(JSONArray().apply { put(0) })
+                        }
+                        refs.put(item)
+                    }
                 }
-                put(JSONArray().put(audioObj))
+                if (refs.length() > 0) {
+                    put(refs)
+                } else {
+                    put(JSONObject.NULL)
+                }
+            } else {
+                put(JSONObject.NULL)
             }
+            put(JSONObject.NULL)
+            put(JSONObject.NULL)
         }
 
         val msgStruct = JSONArray().apply {
@@ -925,11 +959,55 @@ class GeminiWebClient(
     }
 
     /**
-     * Fork / Branch in new chat from a given message
+     * Fork / Branch in new chat from a given message using Google RPC KDNZr.
      */
     suspend fun createBranchInNewChat(conversationId: String, messageId: String): Result<Conversation> = withContext(Dispatchers.IO) {
-        val newId = "c_branch_" + System.currentTimeMillis()
-        Result.success(Conversation(id = newId, title = "Ветвь чата"))
+        try {
+            val turnId = messageId.removePrefix("u_").removePrefix("m_")
+            val payload = JSONArray().apply {
+                put(conversationId)
+                put(turnId)
+            }
+            val res = callBatchexecuteRPC("KDNZr", payload.toString())
+            if (res.isSuccess) {
+                val body = res.getOrThrow()
+                var newConvoId = ""
+                var newTitle = ""
+                for (line in body.split("\n")) {
+                    if (line.contains("KDNZr") && line.contains("wrb.fr")) {
+                        val start = line.indexOf("[")
+                        if (start >= 0) {
+                            val chunkArr = JSONArray(line.substring(start))
+                            for (j in 0 until chunkArr.length()) {
+                                val chunk = chunkArr.optJSONArray(j) ?: continue
+                                if (chunk.optString(0) == "wrb.fr" && chunk.optString(1) == "KDNZr") {
+                                    val innerStr = chunk.optString(2, "")
+                                    if (innerStr.isNotBlank() && innerStr != "null") {
+                                        val innerArr = JSONArray(innerStr)
+                                        val convoObj = innerArr.optJSONArray(0)
+                                        if (convoObj != null) {
+                                            newConvoId = convoObj.optString(0, "")
+                                            newTitle = convoObj.optString(1, "")
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                if (newConvoId.isNotBlank()) {
+                    return@withContext Result.success(
+                        Conversation(id = newConvoId, title = newTitle.ifBlank { "Ветвь чата" })
+                    )
+                }
+            }
+            val fallbackId = "c_branch_" + System.currentTimeMillis()
+            Result.success(Conversation(id = fallbackId, title = "Ветвь чата"))
+        } catch (e: Exception) {
+            Log.e("GeminiWebClient", "createBranchInNewChat error: ${e.message}", e)
+            val fallbackId = "c_branch_" + System.currentTimeMillis()
+            Result.success(Conversation(id = fallbackId, title = "Ветвь чата"))
+        }
     }
 
     /**
@@ -1152,6 +1230,92 @@ class GeminiWebClient(
         }
     }
 
+    /**
+     * Upload an image or file using Google's Scotty resumable push uploader.
+     * Returns the server reference path (e.g. /contrib_service/ttl_1d/...).
+     */
+    suspend fun uploadFile(
+        data: ByteArray,
+        fileName: String,
+        mimeType: String
+    ): Result<String> = withContext(Dispatchers.IO) {
+        try {
+            if (cachedPushId.isNullOrBlank()) {
+                refreshTokensAndFetchModels()
+            }
+            val pushId = cachedPushId ?: return@withContext Result.failure(Exception("Missing pushId parameter"))
+            val pctx = cachedPctx ?: ""
+            val cookie = authRepository.getCookieString()
+
+            val cleanName = fileName.replace("\r", "").replace("\n", "").trim().ifEmpty { "upload.bin" }
+
+            val startReqBuilder = Request.Builder()
+                .url("https://push.clients6.google.com/upload/")
+                .addHeader("Origin", "https://gemini.google.com")
+                .addHeader("Referer", "https://gemini.google.com/")
+                .addHeader("X-Tenant-Id", "bard-storage")
+                .addHeader("Push-ID", pushId)
+                .addHeader("Content-Type", "application/x-www-form-urlencoded;charset=UTF-8")
+                .addHeader("X-Goog-Upload-Command", "start")
+                .addHeader("X-Goog-Upload-Protocol", "resumable")
+                .addHeader("X-Goog-Upload-Header-Content-Length", data.size.toString())
+                .addHeader("Cookie", cookie)
+
+            if (pctx.isNotBlank()) {
+                startReqBuilder.addHeader("X-Client-Pctx", pctx)
+            }
+
+            val startPost = "File name: $cleanName"
+            val startReq = startReqBuilder
+                .post(startPost.toRequestBody("application/x-www-form-urlencoded;charset=UTF-8".toMediaType()))
+                .build()
+
+            var uploadUrl: String? = null
+            client.newCall(startReq).execute().use { resp ->
+                if (!resp.isSuccessful) {
+                    return@withContext Result.failure(Exception("Scotty start failed: HTTP ${resp.code}"))
+                }
+                uploadUrl = resp.header("x-goog-upload-url") ?: resp.header("X-Goog-Upload-URL")
+            }
+
+            val putUrl = uploadUrl ?: return@withContext Result.failure(Exception("Scotty start did not return upload url"))
+
+            val finalizeReqBuilder = Request.Builder()
+                .url(putUrl)
+                .addHeader("Origin", "https://gemini.google.com")
+                .addHeader("Referer", "https://gemini.google.com/")
+                .addHeader("X-Tenant-Id", "bard-storage")
+                .addHeader("Push-ID", pushId)
+                .addHeader("Content-Type", "application/x-www-form-urlencoded;charset=utf-8")
+                .addHeader("X-Goog-Upload-Command", "upload, finalize")
+                .addHeader("X-Goog-Upload-Offset", "0")
+                .addHeader("Cookie", cookie)
+
+            if (pctx.isNotBlank()) {
+                finalizeReqBuilder.addHeader("X-Client-Pctx", pctx)
+            }
+
+            val finalizeReq = finalizeReqBuilder
+                .post(data.toRequestBody("application/octet-stream".toMediaType()))
+                .build()
+
+            client.newCall(finalizeReq).execute().use { resp ->
+                if (!resp.isSuccessful) {
+                    return@withContext Result.failure(Exception("Scotty finalize failed: HTTP ${resp.code}"))
+                }
+                val ref = resp.body?.string()?.trim() ?: ""
+                if (!ref.startsWith("/")) {
+                    return@withContext Result.failure(Exception("Invalid ref received: $ref"))
+                }
+                Log.d("GeminiWebClient", "File uploaded successfully: $cleanName -> $ref")
+                Result.success(ref)
+            }
+        } catch (e: Exception) {
+            Log.e("GeminiWebClient", "Upload error: ${e.message}", e)
+            Result.failure(e)
+        }
+    }
+
     companion object {
         const val USER_AGENT = "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Mobile Safari/537.36"
         const val GEMINI_APP_URL = "https://gemini.google.com/app"
@@ -1162,6 +1326,8 @@ class GeminiWebClient(
         private val PATTERN_AFW_TOKEN = Pattern.compile("\"(AFWLbD[^\"]+)\"")
         private val PATTERN_FDRFJE = Pattern.compile("\"FdrFJe\":\"([^\"]+)\"")
         private val PATTERN_CFB2H = Pattern.compile("\"cfb2h\":\"([^\"]+)\"")
+        private val PATTERN_PUSH_ID = Pattern.compile("\"qKIAYe\":\"([^\"]+)\"")
+        private val PATTERN_PCTX = Pattern.compile("\"Ylro7b\":\"([^\"]+)\"")
     }
 }
 

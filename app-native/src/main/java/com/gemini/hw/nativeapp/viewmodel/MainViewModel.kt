@@ -59,6 +59,32 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val _activeCanvas = MutableStateFlow<CanvasDocument?>(null)
     val activeCanvas: StateFlow<CanvasDocument?> = _activeCanvas.asStateFlow()
 
+    private val _isCanvasMode = MutableStateFlow(false)
+    val isCanvasMode: StateFlow<Boolean> = _isCanvasMode.asStateFlow()
+
+    private val _pendingAttachments = MutableStateFlow<List<Attachment>>(emptyList())
+    val pendingAttachments: StateFlow<List<Attachment>> = _pendingAttachments.asStateFlow()
+
+    fun toggleCanvasMode() {
+        _isCanvasMode.value = !_isCanvasMode.value
+    }
+
+    fun setCanvasMode(enabled: Boolean) {
+        _isCanvasMode.value = enabled
+    }
+
+    fun addAttachment(attachment: Attachment) {
+        _pendingAttachments.value = _pendingAttachments.value + attachment
+    }
+
+    fun removeAttachment(attachmentId: String) {
+        _pendingAttachments.value = _pendingAttachments.value.filter { it.id != attachmentId }
+    }
+
+    fun clearAttachments() {
+        _pendingAttachments.value = emptyList()
+    }
+
     init {
         loadInitialData()
     }
@@ -292,21 +318,30 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         _thinkingLevel.value = level
     }
 
-    fun sendMessage(text: String, targetNotebookId: String? = null) {
-        if (text.isBlank()) return
+    fun sendMessage(
+        text: String,
+        attachments: List<Attachment> = emptyList(),
+        targetNotebookId: String? = null
+    ) {
+        if (text.isBlank() && attachments.isEmpty()) return
         val userMsgId = "msg_u_" + System.currentTimeMillis()
         val userMsg = ChatMessage(
             id = userMsgId,
             conversationId = _currentConversationId.value ?: "new",
             role = MessageRole.USER,
-            text = text.trim()
+            text = text.trim(),
+            attachments = attachments
         )
 
         _messages.value = _messages.value + userMsg
-        dispatchToGemini(text, null, targetNotebookId)
+        dispatchToGemini(text, attachments, targetNotebookId)
     }
 
-    private fun dispatchToGemini(prompt: String, audioBytes: ByteArray?, targetNotebookId: String? = null) {
+    private fun dispatchToGemini(
+        prompt: String,
+        attachments: List<Attachment> = emptyList(),
+        targetNotebookId: String? = null
+    ) {
         viewModelScope.launch {
             _isLoading.value = true
             val convoId = _currentConversationId.value
@@ -317,13 +352,45 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 ?: _conversations.value.firstOrNull { it.id == convoId }?.notebookId
 
             try {
+                // Upload local attachments if any
+                val readyAttachments = attachments.map { att ->
+                    if (att.url.isNullOrBlank() && !att.localUri.isNullOrBlank()) {
+                        try {
+                            val uri = android.net.Uri.parse(att.localUri)
+                            val bytes = getApplication<Application>().contentResolver.openInputStream(uri)?.use { it.readBytes() }
+                            if (bytes != null && bytes.isNotEmpty()) {
+                                val uploadRes = client.uploadFile(bytes, att.name, att.mimeType)
+                                if (uploadRes.isSuccess) {
+                                    att.copy(url = uploadRes.getOrThrow())
+                                } else {
+                                    att
+                                }
+                            } else {
+                                att
+                            }
+                        } catch (e: Exception) {
+                            android.util.Log.e("MainViewModel", "Failed to upload attachment ${att.name}: ${e.message}")
+                            att
+                        }
+                    } else {
+                        att
+                    }
+                }
+
+                var promptToSend = prompt
+                if (_isCanvasMode.value) {
+                    promptToSend = "[Режим Canvas включен. Сформируй ответ в виде подробного структурированного документа или кода с блоками]\n$prompt"
+                }
+
+                var lastResponseText = ""
                 client.sendMessageStream(
                     conversationId = convoId,
-                    prompt = prompt,
+                    prompt = promptToSend,
                     modelId = modelId,
-                    audioBytes = audioBytes,
+                    attachments = readyAttachments,
                     notebookId = currentNotebookId
                 ).collect { responseMsg ->
+                    lastResponseText = responseMsg.text
                     val list = _messages.value.toMutableList()
                     val existingIndex = list.indexOfFirst { it.id == responseMsg.id }
                     if (existingIndex >= 0) {
@@ -340,6 +407,30 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                                 refreshConversations()
                             }
                         }
+                    }
+                }
+
+                // If Canvas Mode is enabled and model returned code or structured document, pop up Canvas automatically!
+                if (_isCanvasMode.value && lastResponseText.isNotBlank()) {
+                    val codeMatch = Regex("""```([a-zA-Z0-9_\-+]*)\n([\s\S]*?)```""").find(lastResponseText)
+                    if (codeMatch != null) {
+                        val lang = codeMatch.groupValues[1]
+                        val code = codeMatch.groupValues[2]
+                        _activeCanvas.value = CanvasDocument(
+                            id = "canvas_${System.currentTimeMillis()}",
+                            title = "Документ Canvas (${lang.ifBlank { "код" }})",
+                            content = code,
+                            language = lang,
+                            version = 1
+                        )
+                    } else if (lastResponseText.length > 200) {
+                        _activeCanvas.value = CanvasDocument(
+                            id = "canvas_${System.currentTimeMillis()}",
+                            title = "Документ Canvas",
+                            content = lastResponseText,
+                            language = "markdown",
+                            version = 1
+                        )
                     }
                 }
 
@@ -407,17 +498,33 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     /**
-     * Branch dialogue into a new chat starting from this message
+     * Branch dialogue into a new chat starting from this message, preserving preceding history.
      */
     fun createBranchInNewChat(message: ChatMessage) {
+        val currentList = _messages.value
+        val targetIndex = currentList.indexOfFirst { it.id == message.id }
+        val historyToCopy = if (targetIndex >= 0) {
+            currentList.subList(0, targetIndex + 1)
+        } else {
+            listOf(message)
+        }
+
         viewModelScope.launch {
             val convoId = _currentConversationId.value ?: return@launch
+            val originalTitle = _conversations.value.firstOrNull { it.id == convoId }?.title ?: "Диалог"
             val res = client.createBranchInNewChat(convoId, message.id)
             if (res.isSuccess) {
-                val branchedConvo = res.getOrThrow()
+                val returnedConvo = res.getOrThrow()
+                val branchTitle = if (returnedConvo.title.isNotBlank() && returnedConvo.title != "Ветвь чата") {
+                    returnedConvo.title
+                } else {
+                    "$originalTitle (ветвь)"
+                }
+                val branchedConvo = returnedConvo.copy(title = branchTitle)
                 _conversations.value = listOf(branchedConvo) + _conversations.value
                 _currentConversationId.value = branchedConvo.id
-                _messages.value = listOf(message.copy(conversationId = branchedConvo.id))
+                _messages.value = historyToCopy.map { it.copy(conversationId = branchedConvo.id) }
+                refreshConversations()
             }
         }
     }

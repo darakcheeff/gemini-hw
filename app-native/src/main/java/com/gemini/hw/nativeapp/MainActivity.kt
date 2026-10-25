@@ -4,7 +4,10 @@ import android.Manifest
 import android.app.Activity
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.net.Uri
 import android.os.Bundle
+import android.provider.MediaStore
+import android.provider.OpenableColumns
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -15,10 +18,12 @@ import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
@@ -41,8 +46,13 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
+import androidx.core.content.FileProvider
 import com.gemini.hw.core.model.*
+import com.gemini.hw.nativeapp.assistant.AssistantActivity
+import com.gemini.hw.nativeapp.audio.TtsManager
+import com.gemini.hw.nativeapp.audio.VoiceInputManager
 import com.gemini.hw.nativeapp.auth.LoginActivity
+import java.io.File
 import com.gemini.hw.nativeapp.ui.components.*
 import com.gemini.hw.nativeapp.ui.theme.GeminiTheme
 import com.gemini.hw.nativeapp.viewmodel.MainViewModel
@@ -123,11 +133,187 @@ fun MainScreen(viewModel: MainViewModel) {
         }
     }
 
+    val voiceInputManager = remember { com.gemini.hw.nativeapp.audio.VoiceInputManager(context) }
+    var isVoiceListening by remember { mutableStateOf(false) }
+
+    val ttsManager = remember { TtsManager(context) }
+    val speakingMsgId by ttsManager.speakingMessageId.collectAsState()
+
+    DisposableEffect(Unit) {
+        onDispose {
+            voiceInputManager.stopListening()
+            ttsManager.destroy()
+        }
+    }
+
+    val isCanvasMode by viewModel.isCanvasMode.collectAsState()
+    val pendingAttachments by viewModel.pendingAttachments.collectAsState()
+    var showAttachmentMenu by remember { mutableStateOf(false) }
+
+    // Camera launcher
+    var tempCameraUri by remember { mutableStateOf<Uri?>(null) }
+    val cameraLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.TakePicture()
+    ) { success ->
+        if (success && tempCameraUri != null) {
+            viewModel.addAttachment(
+                Attachment(
+                    id = "att_${System.currentTimeMillis()}",
+                    name = "Камера_${System.currentTimeMillis()}.jpg",
+                    mimeType = "image/jpeg",
+                    localUri = tempCameraUri.toString()
+                )
+            )
+            Toast.makeText(context, "Фото прикреплено", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    // Gallery / Photos launcher
+    val galleryLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.GetMultipleContents()
+    ) { uris ->
+        uris.forEach { uri ->
+            val name = "Фото_${System.currentTimeMillis()}.jpg"
+            val mime = context.contentResolver.getType(uri) ?: "image/jpeg"
+            viewModel.addAttachment(
+                Attachment(
+                    id = "att_${System.currentTimeMillis()}_${uri.hashCode()}",
+                    name = name,
+                    mimeType = mime,
+                    localUri = uri.toString()
+                )
+            )
+        }
+    }
+
+    // Documents / Google Drive launcher
+    val documentLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenMultipleDocuments()
+    ) { uris ->
+        uris.forEach { uri ->
+            var fileName = "Документ"
+            try {
+                context.contentResolver.query(uri, null, null, null, null)?.use { cursor ->
+                    val nameIndex = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+                    if (nameIndex >= 0 && cursor.moveToFirst()) {
+                        fileName = cursor.getString(nameIndex)
+                    }
+                }
+            } catch (_: Exception) {}
+            val mime = context.contentResolver.getType(uri) ?: "application/octet-stream"
+            viewModel.addAttachment(
+                Attachment(
+                    id = "att_${System.currentTimeMillis()}_${uri.hashCode()}",
+                    name = fileName,
+                    mimeType = mime,
+                    localUri = uri.toString()
+                )
+            )
+        }
+    }
+
+    fun pickLatestScreenshot() {
+        try {
+            val projection = arrayOf(
+                MediaStore.Images.Media._ID,
+                MediaStore.Images.Media.DISPLAY_NAME,
+                MediaStore.Images.Media.DATE_ADDED
+            )
+            val sortOrder = "${MediaStore.Images.Media.DATE_ADDED} DESC"
+            context.contentResolver.query(
+                MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
+                projection,
+                null,
+                null,
+                sortOrder
+            )?.use { cursor ->
+                if (cursor.moveToFirst()) {
+                    val idCol = cursor.getColumnIndexOrThrow(MediaStore.Images.Media._ID)
+                    val nameCol = cursor.getColumnIndexOrThrow(MediaStore.Images.Media.DISPLAY_NAME)
+                    val id = cursor.getLong(idCol)
+                    val name = cursor.getString(nameCol)
+                    val uri = android.content.ContentUris.withAppendedId(
+                        MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
+                        id
+                    )
+                    val mime = context.contentResolver.getType(uri) ?: "image/jpeg"
+                    viewModel.addAttachment(
+                        Attachment(
+                            id = "att_${System.currentTimeMillis()}",
+                            name = name,
+                            mimeType = mime,
+                            localUri = uri.toString()
+                        )
+                    )
+                    Toast.makeText(context, "Скриншот прикреплен: $name", Toast.LENGTH_SHORT).show()
+                } else {
+                    Toast.makeText(context, "Скриншоты не найдены", Toast.LENGTH_SHORT).show()
+                }
+            }
+        } catch (e: Exception) {
+            Toast.makeText(context, "Ошибка доступа к скриншотам: ${e.message}", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    val activity = context as? Activity
+    LaunchedEffect(activity?.intent) {
+        val actIntent = activity?.intent ?: return@LaunchedEffect
+        val assistQuery = actIntent.getStringExtra(AssistantActivity.EXTRA_ASSISTANT_QUERY)
+        val assistImageUri = actIntent.getStringExtra(AssistantActivity.EXTRA_ASSISTANT_IMAGE_URI)
+        if (!assistQuery.isNullOrBlank()) {
+            val atts = if (!assistImageUri.isNullOrBlank()) {
+                listOf(
+                    Attachment(
+                        id = "att_assist_${System.currentTimeMillis()}",
+                        name = "Скриншот экрана.jpg",
+                        mimeType = "image/jpeg",
+                        localUri = assistImageUri
+                    )
+                )
+            } else emptyList()
+            viewModel.sendMessage(assistQuery, atts)
+            actIntent.removeExtra(AssistantActivity.EXTRA_ASSISTANT_QUERY)
+            actIntent.removeExtra(AssistantActivity.EXTRA_ASSISTANT_IMAGE_URI)
+        } else if (actIntent.action == Intent.ACTION_SEND) {
+            val text = actIntent.getStringExtra(Intent.EXTRA_TEXT)
+            val uri = actIntent.getParcelableExtra<Uri>(Intent.EXTRA_STREAM)
+            val atts = if (uri != null) {
+                listOf(
+                    Attachment(
+                        id = "att_share_${System.currentTimeMillis()}",
+                        name = "Вложение",
+                        mimeType = actIntent.type ?: "application/octet-stream",
+                        localUri = uri.toString()
+                    )
+                )
+            } else emptyList()
+            if (!text.isNullOrBlank() || atts.isNotEmpty()) {
+                viewModel.sendMessage(text ?: "Посмотри прикрепленный файл", atts)
+            }
+            actIntent.action = null
+        }
+    }
+
     val permissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestPermission()
     ) { isGranted ->
         if (isGranted) {
-            viewModel.startVoiceRecording()
+            voiceInputManager.startListening(
+                onPartialResult = { partial ->
+                    inputText = partial
+                },
+                onFinalResult = { final ->
+                    inputText = final
+                    isVoiceListening = false
+                },
+                onError = { err ->
+                    isVoiceListening = false
+                    Toast.makeText(context, err, Toast.LENGTH_SHORT).show()
+                },
+                onStateChange = { listening ->
+                    isVoiceListening = listening
+                }
+            )
         } else {
             Toast.makeText(context, "Требуется разрешение на запись звука", Toast.LENGTH_SHORT).show()
         }
@@ -430,6 +616,56 @@ fun MainScreen(viewModel: MainViewModel) {
                         }
                     },
                     actions = {
+                        val activeConvo = conversations.firstOrNull { it.id == currentConvoId }
+                            ?: (if (messages.isNotEmpty() || currentConvoId != null) Conversation(
+                                id = currentConvoId ?: "",
+                                title = messages.firstOrNull { it.role == MessageRole.USER }?.text?.take(30) ?: "Диалог"
+                            ) else null)
+
+                        if (activeConvo != null && (currentConvoId != null || messages.isNotEmpty())) {
+                            IconButton(onClick = {
+                                val title = activeConvo.title
+                                val convoId = currentConvoId ?: activeConvo.id
+                                val url = if (convoId.isNotBlank() && !convoId.startsWith("new")) "\nhttps://gemini.google.com/app/$convoId" else ""
+                                val sendIntent = Intent(Intent.ACTION_SEND).apply {
+                                    putExtra(Intent.EXTRA_TEXT, "Диалог: $title$url")
+                                    type = "text/plain"
+                                }
+                                context.startActivity(Intent.createChooser(sendIntent, "Поделиться диалогом"))
+                            }) {
+                                Icon(Icons.Default.Share, contentDescription = "Поделиться")
+                            }
+
+                            IconButton(onClick = {
+                                convoToRename = activeConvo
+                            }) {
+                                Icon(Icons.Default.Edit, contentDescription = "Переименовать")
+                            }
+
+                            IconButton(onClick = {
+                                val convoId = currentConvoId ?: activeConvo.id
+                                if (convoId.isNotBlank() && !convoId.startsWith("new")) {
+                                    viewModel.deleteConversation(convoId)
+                                } else {
+                                    if (currentNotebook != null) {
+                                        viewModel.closeNotebookChat()
+                                    } else {
+                                        viewModel.startNewChat()
+                                    }
+                                }
+                            }) {
+                                Icon(Icons.Default.Delete, contentDescription = "Удалить")
+                            }
+                        }
+
+                        IconButton(onClick = { viewModel.toggleCanvasMode() }) {
+                            Icon(
+                                Icons.Default.SpaceDashboard,
+                                contentDescription = "Режим Canvas",
+                                tint = if (isCanvasMode) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+
                         if (currentNotebook == null) {
                             IconButton(onClick = { viewModel.startNewChat() }) {
                                 Icon(Icons.Default.Add, contentDescription = "Новый чат")
@@ -517,7 +753,9 @@ fun MainScreen(viewModel: MainViewModel) {
                                 message = msg,
                                 onEdit = { newText -> viewModel.editMessage(msg.id, newText) },
                                 onBranch = { viewModel.createBranchInNewChat(msg) },
-                                onOpenCanvas = { doc -> viewModel.openCanvas(doc) }
+                                onOpenCanvas = { doc -> viewModel.openCanvas(doc) },
+                                speakingMessageId = speakingMsgId,
+                                onToggleTts = { m -> ttsManager.speak(m.id, m.text) }
                             )
                         }
                     }
@@ -553,6 +791,53 @@ fun MainScreen(viewModel: MainViewModel) {
                             }
                         }
 
+                        // Pending attachments preview bar
+                        if (pendingAttachments.isNotEmpty()) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 12.dp, vertical = 4.dp)
+                                    .horizontalScroll(rememberScrollState()),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                pendingAttachments.forEach { att ->
+                                    Surface(
+                                        shape = RoundedCornerShape(8.dp),
+                                        color = MaterialTheme.colorScheme.surfaceVariant,
+                                        modifier = Modifier.height(36.dp)
+                                    ) {
+                                        Row(
+                                            modifier = Modifier.padding(horizontal = 8.dp),
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Icon(
+                                                if (att.mimeType.startsWith("image/")) Icons.Default.Image else Icons.Default.InsertDriveFile,
+                                                contentDescription = null,
+                                                modifier = Modifier.size(16.dp),
+                                                tint = MaterialTheme.colorScheme.primary
+                                            )
+                                            Spacer(modifier = Modifier.width(6.dp))
+                                            Text(
+                                                text = att.name.take(18),
+                                                style = MaterialTheme.typography.bodySmall,
+                                                maxLines = 1
+                                            )
+                                            IconButton(
+                                                onClick = { viewModel.removeAttachment(att.id) },
+                                                modifier = Modifier.size(20.dp)
+                                            ) {
+                                                Icon(
+                                                    Icons.Default.Close,
+                                                    contentDescription = "Удалить",
+                                                    modifier = Modifier.size(14.dp)
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -561,7 +846,7 @@ fun MainScreen(viewModel: MainViewModel) {
                         ) {
                             IconButton(
                                 onClick = {
-                                    Toast.makeText(context, "Прикрепление файлов и изображений", Toast.LENGTH_SHORT).show()
+                                    showAttachmentMenu = true
                                 },
                                 modifier = Modifier
                                     .size(40.dp)
@@ -597,10 +882,26 @@ fun MainScreen(viewModel: MainViewModel) {
                             IconButton(
                                 onClick = {
                                     if (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
-                                        if (isRecordingVoice) {
-                                            viewModel.stopVoiceRecording()
+                                        if (isVoiceListening) {
+                                            voiceInputManager.stopListening()
+                                            isVoiceListening = false
                                         } else {
-                                            viewModel.startVoiceRecording()
+                                            voiceInputManager.startListening(
+                                                onPartialResult = { partial ->
+                                                    inputText = partial
+                                                },
+                                                onFinalResult = { final ->
+                                                    inputText = final
+                                                    isVoiceListening = false
+                                                },
+                                                onError = { err ->
+                                                    isVoiceListening = false
+                                                    Toast.makeText(context, err, Toast.LENGTH_SHORT).show()
+                                                },
+                                                onStateChange = { listening ->
+                                                    isVoiceListening = listening
+                                                }
+                                            )
                                         }
                                     } else {
                                         permissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
@@ -609,12 +910,48 @@ fun MainScreen(viewModel: MainViewModel) {
                                 modifier = Modifier
                                     .size(42.dp)
                                     .clip(CircleShape)
-                                    .background(if (isRecordingVoice) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.surfaceVariant)
+                                    .background(if (isVoiceListening) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.surfaceVariant)
                             ) {
                                 Icon(
-                                    Icons.Default.Mic,
+                                    if (isVoiceListening) Icons.Default.Stop else Icons.Default.Mic,
                                     contentDescription = "Голосовой ввод",
-                                    tint = if (isRecordingVoice) Color.White else MaterialTheme.colorScheme.onSurface
+                                    tint = if (isVoiceListening) Color.White else MaterialTheme.colorScheme.onSurface
+                                )
+                            }
+
+                            IconButton(
+                                onClick = {
+                                    try {
+                                        val liveIntent = Intent().apply {
+                                            setClassName(
+                                                "com.google.android.googlequicksearchbox",
+                                                "com.google.android.apps.search.assistant.surfaces.voice.robin.main.MainActivity"
+                                            )
+                                            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                        }
+                                        context.startActivity(liveIntent)
+                                    } catch (e: Exception) {
+                                        try {
+                                            val bardIntent = context.packageManager.getLaunchIntentForPackage("com.google.android.apps.bard")
+                                            if (bardIntent != null) {
+                                                context.startActivity(bardIntent)
+                                            } else {
+                                                Toast.makeText(context, "Gemini Live недоступен на этом устройстве", Toast.LENGTH_SHORT).show()
+                                            }
+                                        } catch (_: Exception) {
+                                            Toast.makeText(context, "Не удалось запустить Gemini Live", Toast.LENGTH_SHORT).show()
+                                        }
+                                    }
+                                },
+                                modifier = Modifier
+                                    .size(42.dp)
+                                    .clip(CircleShape)
+                                    .background(MaterialTheme.colorScheme.surfaceVariant)
+                            ) {
+                                Icon(
+                                    Icons.Default.GraphicEq,
+                                    contentDescription = "Gemini Live",
+                                    tint = MaterialTheme.colorScheme.primary
                                 )
                             }
 
@@ -622,25 +959,27 @@ fun MainScreen(viewModel: MainViewModel) {
 
                             IconButton(
                                 onClick = {
-                                    if (inputText.isNotBlank()) {
+                                    if (inputText.isNotBlank() || pendingAttachments.isNotEmpty()) {
                                         val textToSend = inputText
+                                        val attsToSend = pendingAttachments
                                         inputText = ""
-                                        viewModel.sendMessage(textToSend)
+                                        viewModel.clearAttachments()
+                                        viewModel.sendMessage(textToSend, attsToSend)
                                     }
                                 },
-                                enabled = inputText.isNotBlank() && !isLoading,
+                                enabled = (inputText.isNotBlank() || pendingAttachments.isNotEmpty()) && !isLoading,
                                 modifier = Modifier
                                     .size(42.dp)
                                     .clip(CircleShape)
                                     .background(
-                                        if (inputText.isNotBlank() && !isLoading) MaterialTheme.colorScheme.primary
+                                        if ((inputText.isNotBlank() || pendingAttachments.isNotEmpty()) && !isLoading) MaterialTheme.colorScheme.primary
                                         else MaterialTheme.colorScheme.surfaceVariant
                                     )
                             ) {
                                 Icon(
                                     Icons.AutoMirrored.Filled.Send,
                                     contentDescription = "Отправить",
-                                    tint = if (inputText.isNotBlank() && !isLoading) Color.White else MaterialTheme.colorScheme.onSurfaceVariant
+                                    tint = if ((inputText.isNotBlank() || pendingAttachments.isNotEmpty()) && !isLoading) Color.White else MaterialTheme.colorScheme.onSurfaceVariant
                                 )
                             }
                         }
@@ -652,12 +991,77 @@ fun MainScreen(viewModel: MainViewModel) {
         }
     }
 
+    if (showAttachmentMenu) {
+        AlertDialog(
+            onDismissRequest = { showAttachmentMenu = false },
+            title = { Text("Прикрепить к сообщению") },
+            text = {
+                Column(modifier = Modifier.fillMaxWidth()) {
+                    ListItem(
+                        headlineContent = { Text("Галерея и Google Фото") },
+                        leadingContent = { Icon(Icons.Default.PhotoLibrary, contentDescription = null, tint = MaterialTheme.colorScheme.primary) },
+                        modifier = Modifier.clickable {
+                            showAttachmentMenu = false
+                            galleryLauncher.launch("image/*")
+                        }
+                    )
+                    ListItem(
+                        headlineContent = { Text("Живая камера") },
+                        leadingContent = { Icon(Icons.Default.PhotoCamera, contentDescription = null, tint = MaterialTheme.colorScheme.primary) },
+                        modifier = Modifier.clickable {
+                            showAttachmentMenu = false
+                            try {
+                                val photoFile = File(context.cacheDir, "camera/photo_${System.currentTimeMillis()}.jpg").apply {
+                                    parentFile?.mkdirs()
+                                }
+                                val uri = FileProvider.getUriForFile(
+                                    context,
+                                    "${context.packageName}.fileprovider",
+                                    photoFile
+                                )
+                                tempCameraUri = uri
+                                cameraLauncher.launch(uri)
+                            } catch (e: Exception) {
+                                Toast.makeText(context, "Ошибка запуска камеры: ${e.message}", Toast.LENGTH_SHORT).show()
+                            }
+                        }
+                    )
+                    ListItem(
+                        headlineContent = { Text("Файлы и Google Диск") },
+                        leadingContent = { Icon(Icons.Default.FolderOpen, contentDescription = null, tint = MaterialTheme.colorScheme.primary) },
+                        modifier = Modifier.clickable {
+                            showAttachmentMenu = false
+                            documentLauncher.launch(arrayOf("*/*"))
+                        }
+                    )
+                    ListItem(
+                        headlineContent = { Text("Скриншот экрана") },
+                        leadingContent = { Icon(Icons.Default.Screenshot, contentDescription = null, tint = MaterialTheme.colorScheme.primary) },
+                        modifier = Modifier.clickable {
+                            showAttachmentMenu = false
+                            pickLatestScreenshot()
+                        }
+                    )
+                }
+            },
+            confirmButton = {},
+            dismissButton = {
+                TextButton(onClick = { showAttachmentMenu = false }) {
+                    Text("Отмена")
+                }
+            }
+        )
+    }
+
     activeCanvas?.let { doc ->
         CanvasDialog(
             document = doc,
             onDismiss = { viewModel.closeCanvas() },
             onSave = { updated ->
                 viewModel.sendMessage("Обнови документ: $updated")
+            },
+            onRevisionPrompt = { prompt ->
+                viewModel.sendMessage(prompt)
             }
         )
     }
@@ -839,6 +1243,15 @@ fun NotebookView(
 ) {
     var inputText by remember { mutableStateOf("") }
     var showModelMenu by remember { mutableStateOf(false) }
+    val context = LocalContext.current
+    val nbVoiceManager = remember { com.gemini.hw.nativeapp.audio.VoiceInputManager(context) }
+    var isNbVoiceListening by remember { mutableStateOf(false) }
+
+    DisposableEffect(Unit) {
+        onDispose {
+            nbVoiceManager.stopListening()
+        }
+    }
 
     val emoji = remember(notebook.title) {
         val lower = notebook.title.lowercase()
@@ -1007,13 +1420,68 @@ fun NotebookView(
                 Spacer(modifier = Modifier.width(4.dp))
 
                 IconButton(
-                    onClick = { /* voice */ },
+                    onClick = {
+                        if (isNbVoiceListening) {
+                            nbVoiceManager.stopListening()
+                            isNbVoiceListening = false
+                        } else {
+                            nbVoiceManager.startListening(
+                                onPartialResult = { partial ->
+                                    inputText = partial
+                                },
+                                onFinalResult = { final ->
+                                    inputText = final
+                                    isNbVoiceListening = false
+                                },
+                                onError = { err ->
+                                    isNbVoiceListening = false
+                                    Toast.makeText(context, err, Toast.LENGTH_SHORT).show()
+                                },
+                                onStateChange = { listening ->
+                                    isNbVoiceListening = listening
+                                }
+                            )
+                        }
+                    },
                     modifier = Modifier.size(36.dp)
                 ) {
                     Icon(
-                        Icons.Default.Mic,
+                        if (isNbVoiceListening) Icons.Default.Stop else Icons.Default.Mic,
                         contentDescription = "Голос",
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant
+                        tint = if (isNbVoiceListening) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+
+                IconButton(
+                    onClick = {
+                        try {
+                            val liveIntent = Intent().apply {
+                                setClassName(
+                                    "com.google.android.googlequicksearchbox",
+                                    "com.google.android.apps.search.assistant.surfaces.voice.robin.main.MainActivity"
+                                )
+                                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                            }
+                            context.startActivity(liveIntent)
+                        } catch (e: Exception) {
+                            try {
+                                val bardIntent = context.packageManager.getLaunchIntentForPackage("com.google.android.apps.bard")
+                                if (bardIntent != null) {
+                                    context.startActivity(bardIntent)
+                                } else {
+                                    Toast.makeText(context, "Gemini Live недоступен на этом устройстве", Toast.LENGTH_SHORT).show()
+                                }
+                            } catch (_: Exception) {
+                                Toast.makeText(context, "Не удалось запустить Gemini Live", Toast.LENGTH_SHORT).show()
+                            }
+                        }
+                    },
+                    modifier = Modifier.size(36.dp)
+                ) {
+                    Icon(
+                        Icons.Default.GraphicEq,
+                        contentDescription = "Gemini Live",
+                        tint = MaterialTheme.colorScheme.primary
                     )
                 }
 
