@@ -1340,7 +1340,7 @@ class GeminiWebClient(
                 name = "voice_record.m4a",
                 mimeType = mimeType,
                 url = ref,
-                size = audioBytes.size.toLong()
+                sizeBytes = audioBytes.size.toLong()
             )
             var recognizedText = ""
             sendMessageStream(
@@ -1349,8 +1349,8 @@ class GeminiWebClient(
                 modelId = "default",
                 attachments = listOf(att)
             ).collect { msg ->
-                if (msg.content.isNotBlank()) {
-                    recognizedText = msg.content
+                if (msg.text.isNotBlank()) {
+                    recognizedText = msg.text
                 }
             }
             val clean = recognizedText.trim().removeSurrounding("\"").removeSurrounding("'")

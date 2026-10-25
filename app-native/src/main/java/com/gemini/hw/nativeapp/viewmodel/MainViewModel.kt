@@ -534,7 +534,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     name = "live_voice.m4a",
                     mimeType = "audio/mp4",
                     url = ref,
-                    size = bytes.size.toLong()
+                    sizeBytes = bytes.size.toLong()
                 )
 
                 var fullResponse = ""
@@ -545,8 +545,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     attachments = listOf(att),
                     notebookId = _activeNotebook.value?.id
                 ).collect { chunk ->
-                    if (chunk.content.isNotBlank()) {
-                        fullResponse = chunk.content
+                    if (chunk.text.isNotBlank()) {
+                        fullResponse = chunk.text
                         onStreamingChunk(fullResponse)
                     }
                 }
