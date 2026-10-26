@@ -273,39 +273,10 @@ class GeminiWebClient(
             if (!notebookId.isNullOrBlank()) {
                 val targetId = if (notebookId.startsWith("notebooks/")) notebookId else "notebooks/$notebookId"
                 val startIdx = if (contextArr != null) 3 else 2
-                // field 7: bot_id
-                for (i in startIdx until 7) {
+                for (i in startIdx until 20) {
                     put(JSONObject.NULL)
                 }
-                put(targetId) // index 7: bot_id
-
-                // field 20: projectId
-                for (i in 8 until 20) {
-                    put(JSONObject.NULL)
-                }
-                put(targetId) // index 20: projectId
-
-                // field 41: xBd metadata
-                for (i in 21 until 41) {
-                    put(JSONObject.NULL)
-                }
-                val projMeta = JSONArray().apply {
-                    for (i in 0..12) put(JSONObject.NULL)
-                    put(JSONArray().apply {
-                        put(2)
-                        put(JSONObject.NULL)
-                        put(JSONObject.NULL)
-                        put(JSONObject.NULL)
-                        put(1)
-                    })
-                }
-                put(projMeta) // index 41: xBd metadata
-
-                // field 105: superprojectId
-                for (i in 42 until 105) {
-                    put(JSONObject.NULL)
-                }
-                put(targetId) // index 105: superprojectId
+                put(targetId) // index 20: projectId (Workspace notebook grounding)
             }
         }
 
