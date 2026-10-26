@@ -213,8 +213,8 @@ class GeminiWebClient(
             put(prompt)
             put(0)
             put(if (conversationId.isNullOrBlank()) null else conversationId)
+            val refs = JSONArray()
             if (attachments.isNotEmpty()) {
-                val refs = JSONArray()
                 for (att in attachments) {
                     val refPath = att.url
                     if (!refPath.isNullOrBlank()) {
@@ -239,11 +239,23 @@ class GeminiWebClient(
                         refs.put(item)
                     }
                 }
-                if (refs.length() > 0) {
-                    put(refs)
-                } else {
+            }
+            if (!notebookId.isNullOrBlank()) {
+                val targetId = if (notebookId.startsWith("notebooks/")) notebookId else "notebooks/$notebookId"
+                val nbAtt = JSONArray().apply {
                     put(JSONObject.NULL)
+                    put("notebook")
+                    for (i in 2..10) put(JSONObject.NULL)
+                    put(JSONArray().apply {
+                        put(JSONArray().apply {
+                            put(targetId)
+                        })
+                    })
                 }
+                refs.put(nbAtt)
+            }
+            if (refs.length() > 0) {
+                put(refs)
             } else {
                 put(JSONObject.NULL)
             }

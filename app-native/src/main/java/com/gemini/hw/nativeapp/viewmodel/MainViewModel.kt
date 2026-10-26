@@ -471,7 +471,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     }
                 }
 
-                val promptToSend = prompt
+                var promptToSend = prompt
+                if (currentNotebookId != null) {
+                    val pLower = prompt.trim().lowercase()
+                    if (pLower.contains("шаг") || pLower.contains("дистанц") || pLower.contains("нагрузк") || pLower.contains("километр") || pLower.contains("маршрут") || pLower.contains("план")) {
+                        promptToSend = "$prompt\n\n(Примечание: На основе запланированного маршрута, локаций и документов/материалов этого блокнота, сформируй подробную оценку и расчет количества шагов и пешей дистанции по дням и локациям. Укажи ориентировочное число шагов в день, перепады высот и рекомендации по нагрузке.)"
+                    }
+                }
 
                 var lastResponseText = ""
                 client.sendMessageStream(

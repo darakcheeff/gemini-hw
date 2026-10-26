@@ -283,6 +283,7 @@ fun MainScreen(
         val actIntent = incomingIntent ?: return@LaunchedEffect
         val assistQuery = actIntent.getStringExtra(AssistantActivity.EXTRA_ASSISTANT_QUERY)
         val assistImageUri = actIntent.getStringExtra(AssistantActivity.EXTRA_ASSISTANT_IMAGE_URI)
+        val targetNbId = actIntent.getStringExtra("extra_notebook_id")
         if (!assistQuery.isNullOrBlank()) {
             val atts = if (!assistImageUri.isNullOrBlank()) {
                 listOf(
@@ -294,7 +295,13 @@ fun MainScreen(
                     )
                 )
             } else emptyList()
-            viewModel.sendMessage(assistQuery, atts)
+            if (!targetNbId.isNullOrBlank()) {
+                val nb = notebooks.firstOrNull { it.id == targetNbId || it.id.endsWith(targetNbId) }
+                    ?: Notebook(id = targetNbId, title = "Блокнот")
+                viewModel.startChatInNotebook(nb, assistQuery)
+            } else {
+                viewModel.sendMessage(assistQuery, atts)
+            }
             onIntentConsumed()
         } else if (actIntent.action == Intent.ACTION_SEND) {
             val text = actIntent.getStringExtra(Intent.EXTRA_TEXT)
@@ -1751,11 +1758,8 @@ fun NotebookView(
                         modifier = Modifier
                             .fillMaxWidth()
                             .clip(RoundedCornerShape(12.dp))
-                            .combinedClickable(
-                                onClick = { onSelectConversation(convo.id) },
-                                onLongClick = { onConversationLongClick(convo) }
-                            )
-                            .padding(vertical = 12.dp, horizontal = 8.dp),
+                            .clickable { onSelectConversation(convo.id) }
+                            .padding(vertical = 8.dp, horizontal = 8.dp),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
@@ -1769,11 +1773,22 @@ fun NotebookView(
                         )
                         val dt = convo.dateText
                         if (!dt.isNullOrBlank()) {
-                            Spacer(modifier = Modifier.width(12.dp))
+                            Spacer(modifier = Modifier.width(8.dp))
                             Text(
                                 text = dt,
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
+                            )
+                        }
+                        IconButton(
+                            onClick = { onConversationLongClick(convo) },
+                            modifier = Modifier.size(32.dp)
+                        ) {
+                            Icon(
+                                Icons.Default.MoreVert,
+                                contentDescription = "Опции",
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                                modifier = Modifier.size(18.dp)
                             )
                         }
                     }
