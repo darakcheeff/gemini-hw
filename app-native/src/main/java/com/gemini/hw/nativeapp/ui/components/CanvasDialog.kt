@@ -150,19 +150,57 @@ fun CanvasDialog(
                         if (isHtml) {
                             val preparedHtml = remember(content) {
                                 var html = content
-                                if (html.contains(".slide-container") && !html.contains(".slide-container:first-of-type")) {
-                                    val styleInject = "<style>.slide-container:first-of-type { opacity: 1 !important; pointer-events: auto !important; }</style>"
-                                    html = if (html.contains("</head>", ignoreCase = true)) {
-                                        html.replaceFirst("</head>", "$styleInject</head>")
-                                    } else {
-                                        styleInject + html
-                                    }
+                                val scaleAndStylePatch = """
+                                <style>
+                                  html, body { width: 100% !important; min-height: 100% !important; margin: 0 !important; padding: 0 !important; }
+                                  #slideshow-holder { min-height: 280px !important; width: 100% !important; display: flex !important; justify-content: center !important; }
+                                  .slide-container.active, .slide-container:first-of-type { opacity: 1 !important; pointer-events: auto !important; }
+                                </style>
+                                <script>
+                                  function safeApplySlideScale() {
+                                    try {
+                                      var wrapper = document.getElementById('slideshow-wrapper');
+                                      var holder = document.getElementById('slideshow-holder');
+                                      if (!wrapper) return;
+                                      var baseW = 1280, baseH = 720;
+                                      var w = holder ? holder.clientWidth : window.innerWidth;
+                                      var h = holder ? holder.clientHeight : window.innerHeight;
+                                      if (!w || w <= 0) w = window.innerWidth || screen.width || 360;
+                                      if (!h || h <= 0) h = window.innerHeight || 480;
+                                      var scaleX = (w - 16) / baseW;
+                                      var scaleY = (h - 60) / baseH;
+                                      var scale = Math.min(scaleX, scaleY);
+                                      if (!scale || scale <= 0.05 || isNaN(scale)) {
+                                        scale = (w - 16) / baseW;
+                                      }
+                                      if (scale < 0.2) scale = 0.25;
+                                      wrapper.style.zoom = scale;
+                                      var firstSlide = document.querySelector('.slide-container');
+                                      if (firstSlide && !firstSlide.classList.contains('active')) {
+                                        firstSlide.classList.add('active');
+                                      }
+                                    } catch(e) {}
+                                  }
+                                  window.addEventListener('load', function() {
+                                    setTimeout(safeApplySlideScale, 50);
+                                    setTimeout(safeApplySlideScale, 200);
+                                    setTimeout(safeApplySlideScale, 600);
+                                  });
+                                  window.addEventListener('resize', safeApplySlideScale);
+                                </script>
+                                """
+                                if (html.contains("</head>", ignoreCase = true)) {
+                                    html = html.replaceFirst("</head>", "$scaleAndStylePatch</head>")
+                                } else {
+                                    html = scaleAndStylePatch + html
                                 }
+
                                 if (html.contains("initializeSlideshowUi()")) {
                                     html = html.replace(
                                         "document.addEventListener('DOMContentLoaded', async function() {",
-                                        "function startSlideshowNow() { try { initializeSlideshowUi(); } catch(e){} }\n" +
+                                        "function startSlideshowNow() { try { initializeSlideshowUi(); } catch(e){} safeApplySlideScale(); }\n" +
                                         "if (document.readyState === 'loading') { document.addEventListener('DOMContentLoaded', startSlideshowNow); } else { startSlideshowNow(); }\n" +
+                                        "setTimeout(safeApplySlideScale, 150);\n" +
                                         "document.addEventListener('DOMContentLoaded', async function() {"
                                     )
                                 }

@@ -273,11 +273,20 @@ class GeminiWebClient(
             if (!notebookId.isNullOrBlank()) {
                 val targetId = if (notebookId.startsWith("notebooks/")) notebookId else "notebooks/$notebookId"
                 val startIdx = if (contextArr != null) 3 else 2
-                for (i in startIdx..18) {
+                // field 7: bot_id
+                for (i in startIdx until 7) {
                     put(JSONObject.NULL)
                 }
-                put(targetId) // field 20: projectId
-                for (i in 20..39) {
+                put(targetId) // index 7: bot_id
+
+                // field 20: projectId
+                for (i in 8 until 20) {
+                    put(JSONObject.NULL)
+                }
+                put(targetId) // index 20: projectId
+
+                // field 41: xBd metadata
+                for (i in 21 until 41) {
                     put(JSONObject.NULL)
                 }
                 val projMeta = JSONArray().apply {
@@ -290,11 +299,13 @@ class GeminiWebClient(
                         put(1)
                     })
                 }
-                put(projMeta) // field 41: xBd metadata
-                for (i in 41..103) {
+                put(projMeta) // index 41: xBd metadata
+
+                // field 105: superprojectId
+                for (i in 42 until 105) {
                     put(JSONObject.NULL)
                 }
-                put(targetId) // field 105: superprojectId
+                put(targetId) // index 105: superprojectId
             }
         }
 

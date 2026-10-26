@@ -471,10 +471,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     }
                 }
 
-                var promptToSend = prompt
-                if (_isCanvasMode.value) {
-                    promptToSend = "[Режим Canvas включен. Сформируй ответ в виде подробного структурированного документа или кода с блоками]\n$prompt"
-                }
+                val promptToSend = prompt
 
                 var lastResponseText = ""
                 client.sendMessageStream(
@@ -496,8 +493,22 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     if (_currentConversationId.value == null) {
                         _currentConversationId.value = responseMsg.conversationId
                         if (currentNotebookId != null) {
+                            val targetNorm = if (currentNotebookId.startsWith("notebooks/")) currentNotebookId else "notebooks/$currentNotebookId"
+                            val rawId = targetNorm.removePrefix("notebooks/")
+                            _conversationNotebookMap[responseMsg.conversationId] = targetNorm
+                            val newConvo = Conversation(
+                                id = responseMsg.conversationId,
+                                title = prompt.take(30),
+                                notebookId = targetNorm,
+                                dateText = "Сегодня"
+                            )
+                            val existingList = _notebookConversations.value[targetNorm] ?: _notebookConversations.value[rawId] ?: emptyList()
+                            val updatedList = (listOf(newConvo) + existingList).distinctBy { it.id }
+                            _notebookConversations.value = _notebookConversations.value + (targetNorm to updatedList) + (rawId to updatedList)
+
                             viewModelScope.launch {
                                 client.addConversationToNotebook(responseMsg.conversationId, currentNotebookId)
+                                loadNotebookConversations(currentNotebookId)
                                 refreshConversations()
                             }
                         }
