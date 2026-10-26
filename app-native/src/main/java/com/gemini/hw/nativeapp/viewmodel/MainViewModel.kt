@@ -244,7 +244,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 val res = client.getNotebookConversations(targetId)
                 if (res.isSuccess) {
                     val serverList = res.getOrThrow()
-                    val merged = (serverList + localConvos).distinctBy { it.id }
+                    val merged = (serverList + combined).distinctBy { it.id }
                     _notebookConversations.value = _notebookConversations.value + (targetId to merged) + (rawId to merged)
                 }
             } catch (_: Exception) {}
