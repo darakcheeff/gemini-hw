@@ -1336,7 +1336,15 @@ class GeminiWebClient(
                             for (j in 0 until chunkArray.length()) {
                                 val chunk = chunkArray.optJSONArray(j) ?: continue
                                 if (chunk.optString(0) == "wrb.fr" && chunk.optString(1) == rpcId) {
+                                    if (chunk.isNull(2)) {
+                                        Log.w("GeminiWebClient", "callBatchexecuteRPC $rpcId wrb.fr payload is null")
+                                        return@withContext Result.failure(Exception("RPC $rpcId returned null"))
+                                    }
                                     val innerStr = chunk.optString(2, "")
+                                    if (innerStr.isBlank() || innerStr == "null") {
+                                        Log.w("GeminiWebClient", "callBatchexecuteRPC $rpcId wrb.fr payload is blank/null")
+                                        return@withContext Result.failure(Exception("RPC $rpcId returned empty payload"))
+                                    }
                                     Log.d("GeminiWebClient", "callBatchexecuteRPC $rpcId wrb.fr: $innerStr")
                                     return@withContext Result.success(innerStr)
                                 }
@@ -1433,13 +1441,14 @@ class GeminiWebClient(
     }
 
     /**
-     * Remove conversation from notebook using MUAZcd (UpdateConversation RPC clearing bot_id and project_id).
+     * Remove conversation from notebook using MUAZcd (UpdateConversation RPC clearing bot_id, bot_project_metadata and project_id).
      */
     suspend fun removeConversationFromNotebook(conversationId: String, notebookId: String): Result<Boolean> = withContext(Dispatchers.IO) {
         try {
             val fieldMask = JSONArray().apply {
                 put(JSONArray().apply {
                     put("bot_id")
+                    put("bot_project_metadata")
                     put("project_id")
                 })
             }
@@ -1449,7 +1458,11 @@ class GeminiWebClient(
                     put(JSONObject.NULL)
                 }
                 put("") // field 8 (index 7): bot_id cleared
-                for (i in 8..26) {
+                for (i in 8..12) {
+                    put(JSONObject.NULL)
+                }
+                put(JSONArray()) // field 14 (index 13): bot_project_metadata cleared
+                for (i in 14..26) {
                     put(JSONObject.NULL)
                 }
                 put("") // field 28 (index 27): project_id cleared

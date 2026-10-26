@@ -512,12 +512,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                             val existingList = _notebookConversations.value[targetNorm] ?: _notebookConversations.value[rawId] ?: emptyList()
                             val updatedList = (listOf(newConvo) + existingList).distinctBy { it.id }
                             _notebookConversations.value = _notebookConversations.value + (targetNorm to updatedList) + (rawId to updatedList)
-
-                            viewModelScope.launch {
-                                client.addConversationToNotebook(responseMsg.conversationId, currentNotebookId)
-                                loadNotebookConversations(currentNotebookId)
-                                refreshConversations()
-                            }
                         }
                     }
                 }
@@ -549,11 +543,26 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     }
                 }
 
-                // Sync conversation list if new conversation was started
+                // Sync conversation list or attach to notebook if new conversation was started
                 if (convoId == null && _currentConversationId.value != null) {
-                    val convoResult = client.getConversations()
-                    if (convoResult.isSuccess) {
-                        _conversations.value = convoResult.getOrThrow()
+                    val finalConvoId = _currentConversationId.value!!
+                    if (currentNotebookId != null) {
+                        val targetNb = currentNotebookId
+                        viewModelScope.launch {
+                            kotlinx.coroutines.delay(600)
+                            val addRes = client.addConversationToNotebook(finalConvoId, targetNb)
+                            if (!addRes.isSuccess) {
+                                kotlinx.coroutines.delay(1000)
+                                client.addConversationToNotebook(finalConvoId, targetNb)
+                            }
+                            loadNotebookConversations(targetNb)
+                            refreshConversations()
+                        }
+                    } else {
+                        val convoResult = client.getConversations()
+                        if (convoResult.isSuccess) {
+                            _conversations.value = convoResult.getOrThrow()
+                        }
                     }
                 }
             } catch (e: Exception) {
