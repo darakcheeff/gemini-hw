@@ -481,7 +481,7 @@ fun MainScreen(
                         )
                     }
                     if (notebooks.isNotEmpty()) {
-                        items(notebooks.take(8)) { nb ->
+                        items(notebooks) { nb ->
                             var showItemMenu by remember { mutableStateOf(false) }
                             Box(modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 2.dp)) {
                                 NavigationDrawerItem(
