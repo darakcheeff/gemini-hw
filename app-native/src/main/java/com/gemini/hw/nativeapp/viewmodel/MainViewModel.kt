@@ -219,6 +219,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun closeNotebookChat() {
         _currentConversationId.value = null
         _messages.value = emptyList()
+        _currentNotebook.value?.let { loadNotebookConversations(it.id) }
     }
 
     private val _notebookConversations = MutableStateFlow<Map<String, List<Conversation>>>(emptyMap())

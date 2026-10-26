@@ -1392,25 +1392,32 @@ class GeminiWebClient(
     }
 
     /**
-     * Move conversation to notebook using MUAZcd (UpdateConversation RPC with bot_id and project_id).
+     * Move conversation to notebook using MUAZcd (UpdateConversation RPC with bot_id, bot_project_metadata, and project_id).
      */
     suspend fun addConversationToNotebook(conversationId: String, notebookId: String): Result<Boolean> = withContext(Dispatchers.IO) {
         try {
             val targetId = if (notebookId.startsWith("notebooks/")) notebookId else "notebooks/$notebookId"
             val fieldMask = JSONArray().apply {
-                put(JSONArray().put("bot_id"))
-                put(JSONArray().put("project_id"))
+                put(JSONArray().apply {
+                    put("bot_id")
+                    put("bot_project_metadata")
+                    put("project_id")
+                })
             }
             val convoProto = JSONArray().apply {
                 put(conversationId)
                 for (i in 1..6) {
                     put(JSONObject.NULL)
                 }
-                put(targetId) // field 7: bot_id
-                for (i in 8..26) {
+                put(targetId) // field 8 (index 7): bot_id
+                for (i in 8..12) {
                     put(JSONObject.NULL)
                 }
-                put(targetId) // field 27: project_id
+                put(JSONArray().apply { put(2) }) // field 14 (index 13): bot_project_metadata [2] (BOT_PROJECT_TYPE_NOTEBOOK)
+                for (i in 14..26) {
+                    put(JSONObject.NULL)
+                }
+                put(targetId) // field 28 (index 27): project_id
             }
             val updateReq = JSONArray().apply {
                 put(JSONObject.NULL)
@@ -1431,19 +1438,21 @@ class GeminiWebClient(
     suspend fun removeConversationFromNotebook(conversationId: String, notebookId: String): Result<Boolean> = withContext(Dispatchers.IO) {
         try {
             val fieldMask = JSONArray().apply {
-                put(JSONArray().put("bot_id"))
-                put(JSONArray().put("project_id"))
+                put(JSONArray().apply {
+                    put("bot_id")
+                    put("project_id")
+                })
             }
             val convoProto = JSONArray().apply {
                 put(conversationId)
                 for (i in 1..6) {
                     put(JSONObject.NULL)
                 }
-                put("") // field 7: bot_id cleared
+                put("") // field 8 (index 7): bot_id cleared
                 for (i in 8..26) {
                     put(JSONObject.NULL)
                 }
-                put("") // field 27: project_id cleared
+                put("") // field 28 (index 27): project_id cleared
             }
             val updateReq = JSONArray().apply {
                 put(JSONObject.NULL)
