@@ -55,7 +55,9 @@ data class ChatMessage(
     val isStreaming: Boolean = false,
     val parentMessageId: String? = null,
     val alternateCandidateCount: Int = 1,
-    val currentCandidateIndex: Int = 0
+    val currentCandidateIndex: Int = 0,
+    val responseId: String? = null,
+    val choiceId: String? = null
 )
 
 @Serializable

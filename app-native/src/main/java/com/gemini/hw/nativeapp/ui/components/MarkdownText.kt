@@ -2,8 +2,11 @@ package com.gemini.hw.nativeapp.ui.components
 
 import android.widget.Toast
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.ClickableText
 import androidx.compose.material.icons.Icons
@@ -39,6 +42,7 @@ sealed class MarkdownBlock {
     data class CodeBlock(val language: String, val code: String) : MarkdownBlock()
     data class Blockquote(val text: String) : MarkdownBlock()
     data class Image(val altText: String, val url: String) : MarkdownBlock()
+    data class Table(val headers: List<String>, val rows: List<List<String>>) : MarkdownBlock()
     object HorizontalRule : MarkdownBlock()
 }
 
@@ -308,6 +312,61 @@ fun MarkdownText(
                     }
                     if (index < blocks.lastIndex) Spacer(modifier = Modifier.height(8.dp))
                 }
+
+                is MarkdownBlock.Table -> {
+                    if (index > 0) Spacer(modifier = Modifier.height(8.dp))
+                    val borderColor = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f)
+                    val headerBg = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.7f)
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .horizontalScroll(rememberScrollState())
+                            .border(1.dp, borderColor, RoundedCornerShape(8.dp))
+                            .clip(RoundedCornerShape(8.dp))
+                    ) {
+                        if (block.headers.isNotEmpty()) {
+                            Row(
+                                modifier = Modifier
+                                    .background(headerBg)
+                                    .padding(vertical = 8.dp)
+                            ) {
+                                block.headers.forEach { cell ->
+                                    Text(
+                                        text = parseInlineMarkdown(cell, primaryColor, codeBgColor, color),
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 13.sp,
+                                        color = color,
+                                        modifier = Modifier
+                                            .widthIn(min = 90.dp, max = 220.dp)
+                                            .padding(horizontal = 10.dp)
+                                    )
+                                }
+                            }
+                            HorizontalDivider(color = borderColor, thickness = 1.dp)
+                        }
+                        block.rows.forEachIndexed { rIdx, rowCells ->
+                            Row(modifier = Modifier.padding(vertical = 7.dp)) {
+                                val colCount = maxOf(block.headers.size, rowCells.size)
+                                for (cIdx in 0 until colCount) {
+                                    val cellText = rowCells.getOrElse(cIdx) { "" }
+                                    Text(
+                                        text = parseInlineMarkdown(cellText, primaryColor, codeBgColor, color),
+                                        fontSize = 13.sp,
+                                        lineHeight = 18.sp,
+                                        color = color,
+                                        modifier = Modifier
+                                            .widthIn(min = 90.dp, max = 220.dp)
+                                            .padding(horizontal = 10.dp)
+                                    )
+                                }
+                            }
+                            if (rIdx < block.rows.lastIndex) {
+                                HorizontalDivider(color = borderColor.copy(alpha = 0.5f), thickness = 0.5.dp)
+                            }
+                        }
+                    }
+                    if (index < blocks.lastIndex) Spacer(modifier = Modifier.height(8.dp))
+                }
             }
         }
     }
@@ -420,6 +479,32 @@ fun parseMarkdownBlocks(rawText: String): List<MarkdownBlock> {
             blocks.add(MarkdownBlock.Blockquote(quoteText))
             i++
             continue
+        }
+
+        // Markdown Table detection: header line with '|', followed by separator '| --- | --- |'
+        if (trimmed.contains("|") && i + 1 < lines.size) {
+            val nextTrimmed = lines[i + 1].trim()
+            val isSeparator = nextTrimmed.contains("|") &&
+                nextTrimmed.replace("|", "").replace("-", "").replace(":", "").trim().isEmpty() &&
+                nextTrimmed.contains("-")
+            if (isSeparator) {
+                flushParagraph()
+                fun splitTableRow(rowLine: String): List<String> {
+                    return rowLine.trim().removePrefix("|").removeSuffix("|").split("|").map { it.trim() }
+                }
+                val headers = splitTableRow(trimmed)
+                val rows = mutableListOf<List<String>>()
+                var j = i + 2
+                while (j < lines.size) {
+                    val rowLine = lines[j].trim()
+                    if (!rowLine.contains("|") || rowLine.isBlank()) break
+                    rows.add(splitTableRow(rowLine))
+                    j++
+                }
+                blocks.add(MarkdownBlock.Table(headers, rows))
+                i = j
+                continue
+            }
         }
 
         if (trimmed.isEmpty()) {

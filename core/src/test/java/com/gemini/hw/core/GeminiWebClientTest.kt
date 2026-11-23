@@ -138,6 +138,14 @@ class GeminiWebClientTest {
         assertEquals("Привет! Чем помочь?", messages[1].text)
         assertEquals(com.gemini.hw.core.model.MessageRole.MODEL, messages[1].role)
     }
+
+    @Test
+    fun testSanitizeModelTextRemovesImmersiveChip() {
+        val raw = "Презентация готова!\n\nhttp://googleusercontent.com/immersive_entry_chip/0\n\nПосмотрите слайды."
+        val cleaned = GeminiWebClient.sanitizeModelText(raw)
+        assertFalse(cleaned.contains("immersive_entry_chip"))
+        assertEquals("Презентация готова!\n\nПосмотрите слайды.", cleaned)
+    }
 }
 
 class MockAuthRepository : AuthRepository(null) {

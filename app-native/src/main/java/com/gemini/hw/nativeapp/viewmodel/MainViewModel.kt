@@ -149,11 +149,28 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             _isLoading.value = true
             val res = client.createNotebook(trimmed)
-            val id = if (res.isSuccess) res.getOrThrow() else "nb_" + System.currentTimeMillis()
-            gemsAndSparkRepo.addNotebook(trimmed, content, id)
-            refreshNotebooks()
+            if (res.isSuccess) {
+                val id = res.getOrThrow()
+                gemsAndSparkRepo.addNotebook(trimmed, content, id)
+                if (content.isNotBlank()) {
+                    gemsAndSparkRepo.addSourceToNotebook(id, content)
+                }
+                refreshNotebooks()
+            }
             _isLoading.value = false
         }
+    }
+
+    fun addSourceToCurrentNotebook(sourceText: String) {
+        val nb = _currentNotebook.value ?: return
+        val trimmed = sourceText.trim()
+        if (trimmed.isBlank()) return
+        gemsAndSparkRepo.addSourceToNotebook(nb.id, trimmed)
+        val updatedSources = (nb.sources + trimmed).distinct()
+        _currentNotebook.value = nb.copy(
+            sources = updatedSources,
+            content = "Источников: ${updatedSources.size}"
+        )
     }
 
     fun removeNotebook(id: String) {
@@ -176,15 +193,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             val convoResult = client.getConversations()
             if (convoResult.isSuccess) {
-                val serverList = convoResult.getOrThrow()
-                _conversations.value = serverList.map { serverConvo ->
-                    val mappedNb = _conversationNotebookMap[serverConvo.id] ?: serverConvo.notebookId
-                    val customTitle = _customConvoTitles[serverConvo.id]
-                    serverConvo.copy(
-                        notebookId = mappedNb,
-                        title = if (!customTitle.isNullOrBlank()) customTitle else serverConvo.title
-                    )
-                }
+                _conversations.value = convoResult.getOrThrow()
             }
         }
     }
@@ -245,8 +254,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 val res = client.getNotebookConversations(targetId)
                 if (res.isSuccess) {
                     val serverList = res.getOrThrow()
-                    val merged = (serverList + combined).distinctBy { it.id }
-                    _notebookConversations.value = _notebookConversations.value + (targetId to merged) + (rawId to merged)
+                    val finalList = if (_isLoading.value) {
+                        (serverList + combined).distinctBy { it.id }
+                    } else {
+                        serverList
+                    }
+                    _notebookConversations.value = _notebookConversations.value + (targetId to finalList) + (rawId to finalList)
                 }
             } catch (_: Exception) {}
             _isRefreshingNotebook.value = false
@@ -432,10 +445,27 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         dispatchToGemini(text, attachments, targetNotebookId)
     }
 
+    fun reviseCanvasDocument(
+        document: CanvasDocument,
+        displayInstruction: String,
+        fullPromptForServer: String
+    ) {
+        if (fullPromptForServer.isBlank()) return
+        val userMsg = ChatMessage(
+            id = "msg_u_" + System.currentTimeMillis(),
+            conversationId = _currentConversationId.value ?: "new",
+            role = MessageRole.USER,
+            text = displayInstruction.trim()
+        )
+        _messages.value = _messages.value + userMsg
+        dispatchToGemini(fullPromptForServer, emptyList(), null)
+    }
+
     private fun dispatchToGemini(
         prompt: String,
         attachments: List<Attachment> = emptyList(),
-        targetNotebookId: String? = null
+        targetNotebookId: String? = null,
+        parentMessageId: String? = null
     ) {
         viewModelScope.launch {
             _isLoading.value = true
@@ -470,23 +500,37 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     } else {
                         att
                     }
-                }
+                }.toMutableList()
 
-                var promptToSend = prompt
                 if (currentNotebookId != null) {
-                    val pLower = prompt.trim().lowercase()
-                    if (pLower.contains("шаг") || pLower.contains("дистанц") || pLower.contains("нагрузк") || pLower.contains("километр") || pLower.contains("маршрут") || pLower.contains("план")) {
-                        promptToSend = "$prompt\n\n(Примечание: На основе запланированного маршрута, локаций и документов/материалов этого блокнота, сформируй подробную оценку и расчет количества шагов и пешей дистанции по дням и локациям. Укажи ориентировочное число шагов в день, перепады высот и рекомендации по нагрузке.)"
+                    val nbSources = gemsAndSparkRepo.getSourcesForNotebook(currentNotebookId)
+                    if (nbSources.isNotEmpty()) {
+                        val notesBytes = nbSources.joinToString("\n\n---\n\n").toByteArray(Charsets.UTF_8)
+                        val uploadNotes = client.uploadFile(notesBytes, "notebook_notes.txt", "text/plain")
+                        if (uploadNotes.isSuccess) {
+                            readyAttachments.add(
+                                Attachment(
+                                    id = "nb_notes_${System.currentTimeMillis()}",
+                                    name = "notebook_notes.txt",
+                                    mimeType = "text/plain",
+                                    url = uploadNotes.getOrThrow(),
+                                    sizeBytes = notesBytes.size.toLong()
+                                )
+                            )
+                        }
                     }
                 }
 
                 var lastResponseText = ""
                 client.sendMessageStream(
                     conversationId = convoId,
-                    prompt = promptToSend,
+                    prompt = prompt,
                     modelId = modelId,
+                    parentMessageId = parentMessageId,
                     attachments = readyAttachments,
-                    notebookId = currentNotebookId
+                    notebookId = currentNotebookId,
+                    thinkingLevel = _thinkingLevel.value,
+                    isCanvasMode = _isCanvasMode.value
                 ).collect { responseMsg ->
                     lastResponseText = responseMsg.text
                     val list = _messages.value.toMutableList()
@@ -497,7 +541,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         list.add(responseMsg)
                     }
                     _messages.value = list
-                    if (_currentConversationId.value == null) {
+                    if (_currentConversationId.value == null && responseMsg.conversationId.startsWith("c_")) {
                         _currentConversationId.value = responseMsg.conversationId
                         if (currentNotebookId != null) {
                             val targetNorm = if (currentNotebookId.startsWith("notebooks/")) currentNotebookId else "notebooks/$currentNotebookId"
@@ -516,7 +560,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     }
                 }
 
-                // If message contains a Canvas document, or Canvas Mode is enabled and model returned code or structured document, pop up Canvas automatically!
+                // Pop up Canvas only when server returned an actual Canvas document or Canvas Mode returned a code block
                 val lastMsg = _messages.value.lastOrNull { it.role == MessageRole.MODEL }
                 if (lastMsg?.canvas != null) {
                     _activeCanvas.value = lastMsg.canvas
@@ -530,14 +574,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                             title = "Документ Canvas (${lang.ifBlank { "код" }})",
                             content = code,
                             language = lang,
-                            version = 1
-                        )
-                    } else if (lastResponseText.length > 200) {
-                        _activeCanvas.value = CanvasDocument(
-                            id = "canvas_${System.currentTimeMillis()}",
-                            title = "Документ Canvas",
-                            content = lastResponseText,
-                            language = "markdown",
                             version = 1
                         )
                     }
@@ -578,40 +614,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun startVoiceRecording() {
-        if (_isRecordingVoice.value) return
-        _isRecordingVoice.value = true
-        viewModelScope.launch {
-            try {
-                val audioBytes = audioRecorder.recordAudio()
-                _isRecordingVoice.value = false
-                if (audioBytes.isNotEmpty()) {
-                    val userMsg = ChatMessage(
-                        id = "msg_audio_" + System.currentTimeMillis(),
-                        conversationId = _currentConversationId.value ?: "new",
-                        role = MessageRole.USER,
-                        text = "🎤 [Голосовое сообщение]"
-                    )
-                    _messages.value = _messages.value + userMsg
-                    val att = Attachment(
-                        id = "att_voice_" + System.currentTimeMillis(),
-                        name = "voice_recording.m4a",
-                        mimeType = "audio/mp4"
-                    )
-                    dispatchToGemini("Ответь на голосовое сообщение", listOf(att))
-                }
-            } catch (e: Exception) {
-                _isRecordingVoice.value = false
-            }
-        }
-    }
-
-    fun stopVoiceRecording() {
-        audioRecorder.stop()
-        _isRecordingVoice.value = false
-    }
-
     val isTranscribing = MutableStateFlow(false)
+    private val liveUserTranscriptions = mutableListOf<String>()
 
     fun transcribeVoiceAudio(file: java.io.File, onResult: (String) -> Unit, onError: (String) -> Unit) {
         viewModelScope.launch {
@@ -642,8 +646,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         onError: (String) -> Unit
     ) {
         viewModelScope.launch {
+            val userMsgId = "live_u_" + System.currentTimeMillis()
             val userMsg = ChatMessage(
-                id = "live_u_" + System.currentTimeMillis(),
+                id = userMsgId,
                 conversationId = _currentConversationId.value ?: "new",
                 role = MessageRole.USER,
                 text = "🎤 [Голосовой разговор]"
@@ -669,35 +674,70 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     sizeBytes = bytes.size.toLong()
                 )
 
+                // Transcribe user's voice turn in parallel using the already uploaded audio
+                var localTranscript = ""
+                val transcribeJob = viewModelScope.launch {
+                    val tRes = client.transcribeAudio(bytes, "audio/mp4")
+                    val tText = tRes.getOrNull()?.trim().orEmpty()
+                    if (tText.isNotBlank()) {
+                        localTranscript = tText
+                        _messages.value = _messages.value.map { m ->
+                            if (m.id == userMsgId) m.copy(text = tText) else m
+                        }
+                    }
+                }
+
                 var fullResponse = ""
+                var modelRespId: String? = null
+                var modelChoiceId: String? = null
                 client.sendMessageStream(
                     conversationId = _currentConversationId.value,
                     prompt = prompt,
-                    modelId = _selectedModel.value?.id ?: "default",
+                    modelId = _selectedModel.value?.id ?: GeminiModel.MODEL_FLASH_3_8.id,
                     attachments = listOf(att),
-                    notebookId = _currentNotebook.value?.id
+                    notebookId = _currentNotebook.value?.id,
+                    thinkingLevel = _thinkingLevel.value
                 ).collect { chunk ->
-                    if (chunk.conversationId.isNotBlank() && _currentConversationId.value != chunk.conversationId) {
+                    if (chunk.conversationId.startsWith("c_") && _currentConversationId.value != chunk.conversationId) {
                         _currentConversationId.value = chunk.conversationId
                     }
+                    if (!chunk.responseId.isNullOrBlank()) modelRespId = chunk.responseId
+                    if (!chunk.choiceId.isNullOrBlank()) modelChoiceId = chunk.choiceId
                     if (chunk.text.isNotBlank()) {
                         fullResponse = chunk.text
                         onStreamingChunk(fullResponse)
                     }
                 }
+
+                transcribeJob.join()
+                if (localTranscript.isNotBlank()) {
+                    liveUserTranscriptions.add(localTranscript)
+                }
+
                 val modelMsg = ChatMessage(
                     id = "live_m_" + System.currentTimeMillis(),
                     conversationId = _currentConversationId.value ?: "new",
                     role = MessageRole.MODEL,
-                    text = fullResponse
+                    text = fullResponse,
+                    responseId = modelRespId,
+                    choiceId = modelChoiceId
                 )
                 _messages.value = _messages.value + modelMsg
                 val finalConvoId = _currentConversationId.value
-                if (!finalConvoId.isNullOrBlank()) {
+                if (!finalConvoId.isNullOrBlank() && finalConvoId.startsWith("c_")) {
                     try {
                         val historyRes = client.getConversationMessages(finalConvoId)
                         if (historyRes.isSuccess && historyRes.getOrThrow().isNotEmpty()) {
-                            _messages.value = historyRes.getOrThrow()
+                            var userTurnIdx = 0
+                            _messages.value = historyRes.getOrThrow().map { msg ->
+                                if (msg.role == MessageRole.USER) {
+                                    val fallbackText = liveUserTranscriptions.getOrNull(userTurnIdx)
+                                    userTurnIdx++
+                                    if (msg.text == "🎤 [Голосовой разговор]" && !fallbackText.isNullOrBlank()) {
+                                        msg.copy(text = fallbackText)
+                                    } else msg
+                                } else msg
+                            }
                         }
                     } catch (_: Exception) {}
                 }
@@ -712,17 +752,21 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     /**
-     * Edit a previously sent message and regenerate response
+     * Edit a previously sent message and regenerate response from parent server turn context
      */
     fun editMessage(messageId: String, newText: String) {
         val list = _messages.value.toMutableList()
         val index = list.indexOfFirst { it.id == messageId }
         if (index >= 0) {
+            val prevModelMsg = list.take(index).lastOrNull { it.role == MessageRole.MODEL }
+            val parentCtx = if (!prevModelMsg?.responseId.isNullOrBlank()) {
+                "${prevModelMsg?.responseId}|${prevModelMsg?.choiceId.orEmpty()}"
+            } else null
             val edited = list[index].copy(text = newText)
             val subList = list.subList(0, index + 1).toMutableList()
             subList[index] = edited
             _messages.value = subList
-            dispatchToGemini(newText, emptyList())
+            dispatchToGemini(newText, emptyList(), parentMessageId = parentCtx)
         }
     }
 

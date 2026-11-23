@@ -18,40 +18,68 @@ class GemsAndSparkRepository {
     private val _notebooks = MutableStateFlow<List<Notebook>>(emptyList())
     val notebooks: StateFlow<List<Notebook>> = _notebooks.asStateFlow()
 
-    private val _renamedTitles = mutableMapOf<String, String>()
+    private val _notebookSources = java.util.concurrent.ConcurrentHashMap<String, List<String>>()
 
     fun setGems(list: List<Gem>) {
         _gems.value = list
     }
 
     fun setNotebooks(list: List<Notebook>) {
-        val currentLocal = _notebooks.value.filter { it.id.startsWith("nb_") }
-        val serverIds = list.map { it.id }.toSet()
-        val keptLocal = currentLocal.filter { it.id !in serverIds }
-        val mergedList = (list + keptLocal).map { nb ->
-            val renamed = _renamedTitles[nb.id]
-            if (renamed != null) nb.copy(title = renamed) else nb
+        _notebooks.value = list.map { nb ->
+            val localSources = _notebookSources[nb.id] ?: emptyList()
+            if (localSources.isNotEmpty()) {
+                nb.copy(sources = (nb.sources + localSources).distinct())
+            } else nb
         }
-        _notebooks.value = mergedList
+    }
+
+    fun addSourceToNotebook(notebookId: String, source: String) {
+        val trimmed = source.trim()
+        if (trimmed.isBlank()) return
+        val current = _notebookSources[notebookId] ?: emptyList()
+        val updated = (current + trimmed).distinct()
+        _notebookSources[notebookId] = updated
+        _notebooks.value = _notebooks.value.map { nb ->
+            if (nb.id == notebookId) {
+                val allSources = (nb.sources + updated).distinct()
+                nb.copy(
+                    sources = allSources,
+                    content = "Источников: ${allSources.size}"
+                )
+            } else nb
+        }
+    }
+
+    fun getSourcesForNotebook(notebookId: String): List<String> {
+        val targetNorm = if (notebookId.startsWith("notebooks/")) notebookId else "notebooks/$notebookId"
+        val rawId = targetNorm.removePrefix("notebooks/")
+        return (_notebookSources[notebookId]
+            ?: _notebookSources[targetNorm]
+            ?: _notebookSources[rawId]
+            ?: emptyList())
     }
 
     fun addNotebook(title: String, content: String = "", id: String? = null): Notebook {
+        val nbId = id ?: ("nb_" + System.currentTimeMillis())
+        if (content.isNotBlank()) {
+            _notebookSources[nbId] = listOf(content.trim())
+        }
         val nb = Notebook(
-            id = id ?: ("nb_" + System.currentTimeMillis()),
+            id = nbId,
             title = title,
-            content = content
+            content = if (content.isNotBlank()) "Источников: 1" else "",
+            sources = if (content.isNotBlank()) listOf(content.trim()) else emptyList()
         )
         _notebooks.value = listOf(nb) + _notebooks.value
         return nb
     }
 
     fun removeNotebook(id: String) {
-        _renamedTitles.remove(id)
+        _notebookSources.remove(id)
         _notebooks.value = _notebooks.value.filter { it.id != id }
     }
 
     fun renameNotebook(id: String, newTitle: String) {
-        _renamedTitles[id] = newTitle
         _notebooks.value = _notebooks.value.map {
             if (it.id == id) it.copy(title = newTitle) else it
         }

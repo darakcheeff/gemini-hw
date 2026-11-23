@@ -3,8 +3,11 @@ package com.gemini.hw.nativeapp.assistant
 import android.content.Intent
 import android.graphics.Bitmap
 import android.os.Bundle
+import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.lifecycle.lifecycleScope
+import kotlinx.coroutines.launch
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -59,6 +62,7 @@ class AssistantActivity : ComponentActivity() {
         setContent {
             var inputText by remember { mutableStateOf("") }
             var isListening by remember { mutableStateOf(false) }
+            var isTranscribing by remember { mutableStateOf(false) }
 
             // Dismiss when tapping outside the bottom sheet
             Box(
@@ -186,7 +190,15 @@ class AssistantActivity : ComponentActivity() {
                             OutlinedTextField(
                                 value = inputText,
                                 onValueChange = { inputText = it },
-                                placeholder = { Text(if (isListening) "Слушаю..." else "Спросите о содержимом экрана...") },
+                                placeholder = {
+                                    Text(
+                                        when {
+                                            isListening -> "Слушаю..."
+                                            isTranscribing -> "Распознавание речи..."
+                                            else -> "Спросите о содержимом экрана..."
+                                        }
+                                    )
+                                },
                                 modifier = Modifier.weight(1f),
                                 maxLines = 3,
                                 trailingIcon = {
@@ -196,9 +208,29 @@ class AssistantActivity : ComponentActivity() {
                                                 isListening = false
                                                 val file = voiceInputManager.stopRecording()
                                                 if (file != null) {
-                                                    inputText = "Анализ экрана по голосовому запросу"
+                                                    isTranscribing = true
+                                                    lifecycleScope.launch {
+                                                        try {
+                                                            val bytes = file.readBytes()
+                                                            val res = (application as com.gemini.hw.nativeapp.GeminiApp)
+                                                                .geminiWebClient.transcribeAudio(bytes, "audio/mp4")
+                                                            if (res.isSuccess) {
+                                                                val txt = res.getOrNull().orEmpty().trim()
+                                                                if (txt.isNotBlank()) {
+                                                                    inputText = if (inputText.isBlank()) txt else "$inputText $txt"
+                                                                }
+                                                            } else {
+                                                                Toast.makeText(this@AssistantActivity, "Не удалось распознать речь", Toast.LENGTH_SHORT).show()
+                                                            }
+                                                        } catch (e: Exception) {
+                                                            Toast.makeText(this@AssistantActivity, "Ошибка распознавания: ${e.message}", Toast.LENGTH_SHORT).show()
+                                                        } finally {
+                                                            file.delete()
+                                                            isTranscribing = false
+                                                        }
+                                                    }
                                                 }
-                                            } else {
+                                            } else if (!isTranscribing) {
                                                 val ok = voiceInputManager.startRecording()
                                                 if (ok) {
                                                     isListening = true
@@ -209,7 +241,7 @@ class AssistantActivity : ComponentActivity() {
                                         Icon(
                                             if (isListening) Icons.Default.GraphicEq else Icons.Default.Mic,
                                             contentDescription = "Голос",
-                                            tint = if (isListening) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+                                            tint = if (isListening) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant
                                         )
                                     }
                                 }

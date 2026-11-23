@@ -82,6 +82,47 @@ fun MessageBubble(
                         }
                     }
                 } else {
+                    // Collapsible Thoughts block if present
+                    if (!isUser && !message.thoughts.isNullOrBlank()) {
+                        var showThoughts by remember { mutableStateOf(false) }
+                        Surface(
+                            onClick = { showThoughts = !showThoughts },
+                            shape = RoundedCornerShape(8.dp),
+                            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(bottom = 8.dp)
+                        ) {
+                            Column(modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp)) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(
+                                        text = "💭 Ход рассуждений",
+                                        style = MaterialTheme.typography.labelMedium,
+                                        color = MaterialTheme.colorScheme.primary
+                                    )
+                                    Icon(
+                                        if (showThoughts) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(18.dp),
+                                        tint = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                                if (showThoughts) {
+                                    Spacer(modifier = Modifier.height(6.dp))
+                                    Text(
+                                        text = message.thoughts ?: "",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                            }
+                        }
+                    }
+
                     // Rich formatted markdown text
                     MarkdownText(
                         text = message.text,

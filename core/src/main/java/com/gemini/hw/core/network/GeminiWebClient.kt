@@ -124,7 +124,7 @@ class GeminiWebClient(
         return try {
             val at = cachedSnlm0e ?: return emptyList()
             val fsid = cachedFdrFJe ?: ""
-            val bl = cachedBuildLabel ?: "boq_gemini-web-uiserver_20261023.01_p0"
+            val bl = cachedBuildLabel ?: DEFAULT_BUILD_LABEL
 
             val fReq = "[[[\"otAQ7b\",\"[]\",null,\"generic\"]]]"
             val postData = "f.req=" + URLEncoder.encode(fReq, "UTF-8") + "&at=" + URLEncoder.encode(at, "UTF-8")
@@ -200,7 +200,9 @@ class GeminiWebClient(
         parentMessageId: String? = null,
         audioBytes: ByteArray? = null,
         attachments: List<Attachment> = emptyList(),
-        notebookId: String? = null
+        notebookId: String? = null,
+        thinkingLevel: String = "Авто",
+        isCanvasMode: Boolean = false
     ): Flow<ChatMessage> = flow {
         if (cachedSnlm0e.isNullOrBlank()) {
             refreshTokensAndFetchModels()
@@ -263,7 +265,16 @@ class GeminiWebClient(
             put(JSONObject.NULL)
         }
 
-        val ctx = if (!conversationId.isNullOrBlank()) conversationContextMap[conversationId] else null
+        val ctx = when {
+            !conversationId.isNullOrBlank() && !parentMessageId.isNullOrBlank() -> {
+                val parts = parentMessageId.split("|")
+                val rId = parts.getOrNull(0)?.takeIf { it.isNotBlank() }
+                val cId = parts.getOrNull(1)?.takeIf { it.isNotBlank() }
+                Pair(rId, cId)
+            }
+            !conversationId.isNullOrBlank() -> conversationContextMap[conversationId]
+            else -> null
+        }
         val contextArr = if (ctx != null && !ctx.first.isNullOrBlank()) {
             JSONArray().apply {
                 put(conversationId)
@@ -279,13 +290,14 @@ class GeminiWebClient(
         val msgStruct = JSONArray().apply {
             put(promptArr)
             put(JSONArray().put("ru"))
-            if (contextArr != null) {
-                put(contextArr)
-            }
+            put(contextArr ?: JSONObject.NULL) // index 2: always fixed slot
             if (!notebookId.isNullOrBlank()) {
                 val targetId = if (notebookId.startsWith("notebooks/")) notebookId else "notebooks/$notebookId"
-                val startIdx = if (contextArr != null) 3 else 2
-                for (i in startIdx until 20) {
+                for (i in 3..6) {
+                    put(JSONObject.NULL)
+                }
+                put(targetId) // index 7: bot_id
+                for (i in 8..19) {
                     put(JSONObject.NULL)
                 }
                 put(targetId) // index 20: projectId (Workspace notebook grounding)
@@ -300,13 +312,13 @@ class GeminiWebClient(
         val postData = "f.req=" + URLEncoder.encode(fReq.toString(), "UTF-8") +
                 "&at=" + URLEncoder.encode(snlm0e, "UTF-8")
 
-        val bl = cachedBuildLabel ?: "boq_gemini-web-uiserver_20261023.01_p0"
+        val bl = cachedBuildLabel ?: DEFAULT_BUILD_LABEL
         val fsid = cachedFdrFJe ?: ""
         val url = "$STREAM_GENERATE_URL?bl=$bl&f.sid=$fsid&hl=ru&_reqid=${nextReqId()}&rt=c"
 
-        Log.d("GeminiWebClient", "Sending StreamGenerate request, convoId=$conversationId, notebookId=$notebookId, prompt=$prompt")
+        Log.d("GeminiWebClient", "Sending StreamGenerate request, convoId=$conversationId, modelId=$modelId, thinking=$thinkingLevel, canvas=$isCanvasMode, notebookId=$notebookId")
 
-        val request = Request.Builder()
+        val requestBuilder = Request.Builder()
             .url(url)
             .addHeader("User-Agent", USER_AGENT)
             .addHeader("Content-Type", "application/x-www-form-urlencoded;charset=UTF-8")
@@ -315,10 +327,16 @@ class GeminiWebClient(
             .addHeader("X-Same-Domain", "1")
             .addHeader("Cookie", cookie)
             .post(postData.toRequestBody("application/x-www-form-urlencoded;charset=UTF-8".toMediaType()))
-            .build()
+
+        val resolvedModelHex = modelId.trim()
+        if (resolvedModelHex.length == 16 && resolvedModelHex.all { it.isDigit() || it in 'a'..'f' || it in 'A'..'F' }) {
+            requestBuilder.addHeader("x-goog-ext-525001261-jspb", "[1,null,null,null,\"$resolvedModelHex\"]")
+        }
+
+        val request = requestBuilder.build()
 
         val fullTextBuilder = StringBuilder()
-        var currentConvoId = conversationId ?: ("c_" + System.currentTimeMillis())
+        var currentConvoId = conversationId ?: ""
         val messageId = "m_" + System.currentTimeMillis()
 
         client.newCall(request).execute().use { response ->
@@ -346,18 +364,30 @@ class GeminiWebClient(
                             val innerData = JSONArray(innerStr)
                             val convoInfo = innerData.optJSONArray(1)
                             val candidates = innerData.optJSONArray(4)
+                            var lastRespId: String? = null
+                            var lastChoiceId: String? = null
                             if (convoInfo != null && convoInfo.length() > 0) {
-                                currentConvoId = convoInfo.optString(0, currentConvoId)
+                                val parsedCid = convoInfo.optString(0, "")
+                                if (parsedCid.startsWith("c_")) {
+                                    currentConvoId = parsedCid
+                                }
                                 val respId = convoInfo.optString(1, "")
                                 val choiceId = candidates?.optJSONArray(0)?.optString(0, "") ?: ""
-                                if (currentConvoId.isNotBlank() && (respId.isNotBlank() || choiceId.isNotBlank())) {
-                                    conversationContextMap[currentConvoId] = Pair(respId.ifBlank { null }, choiceId.ifBlank { null })
+                                lastRespId = respId.ifBlank { null }
+                                lastChoiceId = choiceId.ifBlank { null }
+                                if (currentConvoId.startsWith("c_") && (lastRespId != null || lastChoiceId != null)) {
+                                    conversationContextMap[currentConvoId] = Pair(lastRespId, lastChoiceId)
                                 }
                             }
                             if (candidates != null && candidates.length() > 0) {
                                 val firstCandidate = candidates.optJSONArray(0)
                                 val textParts = firstCandidate?.optJSONArray(1)
                                 var replyChunk = textParts?.optString(0, "") ?: ""
+                                replyChunk = sanitizeModelText(replyChunk)
+
+                                val extractedThoughts = firstCandidate?.optJSONArray(37)?.optJSONArray(0)?.optString(0, "")
+                                    ?.ifBlank { null }
+                                    ?: firstCandidate?.optJSONArray(37)?.optString(0, "")?.ifBlank { null }
 
                                 val generatedAttachments = mutableListOf<Attachment>()
 
@@ -432,8 +462,11 @@ class GeminiWebClient(
                                             conversationId = currentConvoId,
                                             role = MessageRole.MODEL,
                                             text = fullTextBuilder.toString(),
+                                            thoughts = extractedThoughts,
                                             attachments = generatedAttachments,
-                                            canvas = canvasDoc
+                                            canvas = canvasDoc,
+                                            responseId = lastRespId,
+                                            choiceId = lastChoiceId
                                         )
                                     )
                                 }
@@ -458,7 +491,7 @@ class GeminiWebClient(
             val snlm0e = cachedSnlm0e ?: authRepository.getSnlm0eToken() ?: ""
             val cookie = authRepository.getCookieString()
             val fsid = cachedFdrFJe ?: ""
-            val bl = cachedBuildLabel ?: "boq_gemini-web-uiserver_20261023.01_p0"
+            val bl = cachedBuildLabel ?: DEFAULT_BUILD_LABEL
 
             val allConvos = mutableListOf<Conversation>()
             var continuationToken: String? = null
@@ -519,7 +552,7 @@ class GeminiWebClient(
             val snlm0e = cachedSnlm0e ?: authRepository.getSnlm0eToken() ?: ""
             val cookie = authRepository.getCookieString()
             val fsid = cachedFdrFJe ?: ""
-            val bl = cachedBuildLabel ?: "boq_gemini-web-uiserver_20261023.01_p0"
+            val bl = cachedBuildLabel ?: DEFAULT_BUILD_LABEL
 
             val targetId = if (notebookId.startsWith("notebooks/")) notebookId else "notebooks/$notebookId"
             val payload = JSONArray().apply {
@@ -694,38 +727,6 @@ class GeminiWebClient(
      * Load message history for a specific conversation using hNvQHb RPC.
      */
     suspend fun getConversationMessages(conversationId: String): Result<List<ChatMessage>> = withContext(Dispatchers.IO) {
-        if (conversationId == "c_china_1") {
-            return@withContext Result.success(listOf(
-                ChatMessage(
-                    id = "msg_c1_1",
-                    conversationId = conversationId,
-                    role = MessageRole.USER,
-                    text = "Как правильно заполнить анкету на визу в Китай?"
-                ),
-                ChatMessage(
-                    id = "msg_c1_2",
-                    conversationId = conversationId,
-                    role = MessageRole.MODEL,
-                    text = "Для подачи заявления на визу в Китай необходимо заполнить электронную визовую анкету на официальном сайте COVA (China Online Visa Application). Убедитесь, что все паспортные данные, информация о месте работы и маршруте поездки совпадают с бронями отелей и авиабилетов."
-                )
-            ))
-        }
-        if (conversationId == "c_china_2") {
-            return@withContext Result.success(listOf(
-                ChatMessage(
-                    id = "msg_c2_1",
-                    conversationId = conversationId,
-                    role = MessageRole.USER,
-                    text = "Маршрут поездки: Чанша, Чжанцзяцзе и Улинъюань на 2026 год"
-                ),
-                ChatMessage(
-                    id = "msg_c2_2",
-                    conversationId = conversationId,
-                    role = MessageRole.MODEL,
-                    text = "Отличный выбор! Вот ориентировочный маршрут на 7-10 дней по провинции Хунань:\n\n1. Чанша (1-2 дня): Остров Оранжевый (Цзюйцзычжоу), Академия Юэлу, уличная еда на улице Поцзы.\n2. Чжанцзяцзе и Улинъюань (4-5 дней): Национальный лесной парк, гора Тяньцзы, каньон Юаньцзяцзе (горы Аватар), стеклянный мост через Большой каньон.\n3. Гора Тяньмэнь (1 день): Канатная дорога, Небесные врата, 999 ступеней."
-                )
-            ))
-        }
         try {
             if (cachedSnlm0e.isNullOrBlank()) {
                 refreshTokensAndFetchModels()
@@ -733,7 +734,7 @@ class GeminiWebClient(
             val snlm0e = cachedSnlm0e ?: authRepository.getSnlm0eToken() ?: ""
             val cookie = authRepository.getCookieString()
             val fsid = cachedFdrFJe ?: ""
-            val bl = cachedBuildLabel ?: "boq_gemini-web-uiserver_20261023.01_p0"
+            val bl = cachedBuildLabel ?: DEFAULT_BUILD_LABEL
 
             val innerPayload = JSONArray().apply {
                 put(conversationId)
@@ -855,6 +856,8 @@ class GeminiWebClient(
 
                                          // Model response
                                         var modelText = ""
+                                        var modelThoughts: String? = null
+                                        var modelChoiceId: String? = null
                                         var canvasDoc: CanvasDocument? = null
                                         for (idx in listOf(3, 2, 4)) {
                                             val cArr = turn.optJSONArray(idx)
@@ -862,6 +865,10 @@ class GeminiWebClient(
                                                 val candList = cArr.optJSONArray(0) ?: cArr
                                                 val firstCand = candList.optJSONArray(0)
                                                 if (firstCand != null) {
+                                                    modelChoiceId = firstCand.optString(0, "").ifBlank { null }
+                                                    modelThoughts = firstCand.optJSONArray(37)?.optJSONArray(0)?.optString(0, "")
+                                                        ?.ifBlank { null }
+                                                        ?: firstCand.optJSONArray(37)?.optString(0, "")?.ifBlank { null }
                                                     val cand30 = firstCand.optJSONArray(30)
                                                     if (cand30 != null && cand30.length() > 0) {
                                                         val cItem = cand30.optJSONArray(0)
@@ -894,11 +901,12 @@ class GeminiWebClient(
                                                         val candStr = firstCand.toString()
                                                         val ggDlRegex = Regex("""https://[a-zA-Z0-9.\-_/]*googleusercontent\.com/(?:gg-dl|gg)/[^\s\)\"\'\]]+""")
                                                         val foundGg = ggDlRegex.findAll(candStr).map { it.value }.toList()
-                                                        modelText = if (foundGg.isNotEmpty()) {
+                                                        val replaced = if (foundGg.isNotEmpty()) {
                                                             m3.replace(Regex("""http://googleusercontent\.com/image_generation_content/\d+_\d+"""), foundGg.first())
                                                         } else {
                                                             m3
                                                         }
+                                                        modelText = sanitizeModelText(replaced)
                                                         break
                                                     }
                                                 }
@@ -911,7 +919,10 @@ class GeminiWebClient(
                                                     conversationId = conversationId,
                                                     role = MessageRole.MODEL,
                                                     text = modelText,
-                                                    canvas = canvasDoc
+                                                    thoughts = modelThoughts,
+                                                    canvas = canvasDoc,
+                                                    responseId = turnId,
+                                                    choiceId = modelChoiceId
                                                 )
                                             )
                                         }
@@ -940,7 +951,7 @@ class GeminiWebClient(
             val snlm0e = cachedSnlm0e ?: authRepository.getSnlm0eToken() ?: ""
             val cookie = authRepository.getCookieString()
             val fsid = cachedFdrFJe ?: ""
-            val bl = cachedBuildLabel ?: "boq_gemini-web-uiserver_20261023.01_p0"
+            val bl = cachedBuildLabel ?: DEFAULT_BUILD_LABEL
 
             val fReq = "[[[\"CNgdBe\",\"[3,[\\\"ru\\\"],0]\",null,\"system\"],[\"CNgdBe\",\"[2,[\\\"ru\\\"],0]\",null,\"custom\"]]]"
             val postData = "f.req=" + URLEncoder.encode(fReq, "UTF-8") + "&at=" + URLEncoder.encode(snlm0e, "UTF-8")
@@ -1280,19 +1291,21 @@ class GeminiWebClient(
                     )
                 }
             }
-            val fallbackId = "c_branch_" + System.currentTimeMillis()
-            Result.success(Conversation(id = fallbackId, title = "Ветвь чата"))
+            Result.failure(Exception("Не удалось создать ветвь чата на сервере"))
         } catch (e: Exception) {
             Log.e("GeminiWebClient", "createBranchInNewChat error: ${e.message}", e)
-            val fallbackId = "c_branch_" + System.currentTimeMillis()
-            Result.success(Conversation(id = fallbackId, title = "Ветвь чата"))
+            Result.failure(e)
         }
     }
 
     /**
-     * Executes a Google batchexecute RPC request.
+     * Executes a Google batchexecute RPC request with automatic token refresh on 400/401/403.
      */
-    suspend fun callBatchexecuteRPC(rpcId: String, innerPayloadJson: String): Result<String> = withContext(Dispatchers.IO) {
+    suspend fun callBatchexecuteRPC(
+        rpcId: String,
+        innerPayloadJson: String,
+        allowRetry: Boolean = true
+    ): Result<String> = withContext(Dispatchers.IO) {
         try {
             if (cachedSnlm0e.isNullOrBlank()) {
                 refreshTokensAndFetchModels()
@@ -1300,7 +1313,7 @@ class GeminiWebClient(
             val snlm0e = cachedSnlm0e ?: authRepository.getSnlm0eToken() ?: ""
             val cookie = authRepository.getCookieString()
             val fsid = cachedFdrFJe ?: ""
-            val bl = cachedBuildLabel ?: "boq_gemini-web-uiserver_20261023.01_p0"
+            val bl = cachedBuildLabel ?: DEFAULT_BUILD_LABEL
 
             val fReq = "[[[\"$rpcId\",\"${innerPayloadJson.replace("\\", "\\\\").replace("\"", "\\\"")}\",null,\"generic\"]]]"
             val postData = "f.req=" + URLEncoder.encode(fReq, "UTF-8") + "&at=" + URLEncoder.encode(snlm0e, "UTF-8")
@@ -1324,6 +1337,11 @@ class GeminiWebClient(
                 Log.d("GeminiWebClient", "callBatchexecuteRPC $rpcId status: ${response.code}")
                 val body = response.body?.string() ?: ""
                 if (!response.isSuccessful) {
+                    if (allowRetry && response.code in listOf(400, 401, 403)) {
+                        Log.w("GeminiWebClient", "RPC $rpcId HTTP ${response.code}, refreshing tokens and retrying...")
+                        refreshTokensAndFetchModels()
+                        return@withContext callBatchexecuteRPC(rpcId, innerPayloadJson, allowRetry = false)
+                    }
                     Log.e("GeminiWebClient", "callBatchexecuteRPC $rpcId failed HTTP ${response.code}: $body")
                     return@withContext Result.failure(Exception("HTTP ${response.code}: $body"))
                 }
@@ -1517,7 +1535,7 @@ class GeminiWebClient(
                     Log.d("GeminiWebClient", "createNotebook success id: $newId")
                     Result.success(newId)
                 } else {
-                    Result.success("notebooks/" + java.util.UUID.randomUUID().toString())
+                    Result.failure(Exception("Сервер не вернул ID созданного блокнота"))
                 }
             } else {
                 Result.failure(res.exceptionOrNull() ?: Exception("createNotebook RPC failed"))
@@ -1675,6 +1693,14 @@ class GeminiWebClient(
         const val GEMINI_APP_URL = "https://gemini.google.com/app"
         const val BATCH_EXECUTE_URL = "https://gemini.google.com/_/BardChatUi/data/batchexecute"
         const val STREAM_GENERATE_URL = "https://gemini.google.com/_/BardChatUi/data/assistant.lamda.BardFrontendService/StreamGenerate"
+        const val DEFAULT_BUILD_LABEL = "boq_gemini-web-uiserver_20261025.09_p0"
+
+        internal fun sanitizeModelText(raw: String): String {
+            return raw
+                .replace(Regex("""https?://googleusercontent\.com/immersive_entry_chip/\d+"""), "")
+                .replace(Regex("""\n{3,}"""), "\n\n")
+                .trim()
+        }
 
         private val PATTERN_SNLM0E = Pattern.compile("\"SNlM0e\":\"([^\"]+)\"")
         private val PATTERN_AFW_TOKEN = Pattern.compile("\"(AFWLbD[^\"]+)\"")

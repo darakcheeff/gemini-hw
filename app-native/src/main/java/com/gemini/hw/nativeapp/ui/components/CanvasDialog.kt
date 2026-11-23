@@ -34,7 +34,7 @@ fun CanvasDialog(
     document: CanvasDocument,
     onDismiss: () -> Unit,
     onSave: (String) -> Unit,
-    onRevisionPrompt: ((String) -> Unit)? = null
+    onRevisionPrompt: ((displayTitle: String, fullServerPrompt: String) -> Unit)? = null
 ) {
     var content by remember(document.content) { mutableStateOf(document.content) }
     var selectedTab by remember { mutableStateOf(0) } // 0: Preview, 1: Edit
@@ -216,11 +216,15 @@ fun CanvasDialog(
                                         settings.loadWithOverviewMode = true
                                         settings.mixedContentMode = android.webkit.WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
                                         setBackgroundColor(android.graphics.Color.parseColor("#1E1F20"))
+                                        tag = preparedHtml
                                         loadDataWithBaseURL("https://gemini.google.com", preparedHtml, "text/html", "UTF-8", null)
                                     }
                                 },
                                 update = { webView ->
-                                    webView.loadDataWithBaseURL("https://gemini.google.com", preparedHtml, "text/html", "UTF-8", null)
+                                    if (webView.tag != preparedHtml) {
+                                        webView.tag = preparedHtml
+                                        webView.loadDataWithBaseURL("https://gemini.google.com", preparedHtml, "text/html", "UTF-8", null)
+                                    }
                                 },
                                 modifier = Modifier.fillMaxSize()
                             )
@@ -267,38 +271,54 @@ fun CanvasDialog(
                         .horizontalScroll(rememberScrollState()),
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
+                    val docTitle = document.title.ifBlank { "документ" }
                     SuggestionChip(
                         onClick = {
                             onDismiss()
-                            onRevisionPrompt?.invoke("Найди и исправь возможные ошибки, баги и неточности в этом документе:\n\n```${document.language ?: ""}\n$content\n```")
+                            onRevisionPrompt?.invoke(
+                                "🔍 Найти ошибки в «$docTitle»",
+                                "Найди и исправь возможные ошибки, баги и неточности в этом документе:\n\n```${document.language ?: ""}\n$content\n```"
+                            )
                         },
                         label = { Text("🔍 Найти ошибки", fontSize = 12.sp) }
                     )
                     SuggestionChip(
                         onClick = {
                             onDismiss()
-                            onRevisionPrompt?.invoke("Сделай этот документ более лаконичным, кратким и четким:\n\n```${document.language ?: ""}\n$content\n```")
+                            onRevisionPrompt?.invoke(
+                                "📝 Сделать короче «$docTitle»",
+                                "Сделай этот документ более лаконичным, кратким и четким:\n\n```${document.language ?: ""}\n$content\n```"
+                            )
                         },
                         label = { Text("📝 Сделать короче", fontSize = 12.sp) }
                     )
                     SuggestionChip(
                         onClick = {
                             onDismiss()
-                            onRevisionPrompt?.invoke("Добавь подробные поясняющие комментарии и документацию к этому тексту/коду:\n\n```${document.language ?: ""}\n$content\n```")
+                            onRevisionPrompt?.invoke(
+                                "💬 Добавить комментарии в «$docTitle»",
+                                "Добавь подробные поясняющие комментарии и документацию к этому тексту/коду:\n\n```${document.language ?: ""}\n$content\n```"
+                            )
                         },
                         label = { Text("💬 Добавить комментарии", fontSize = 12.sp) }
                     )
                     SuggestionChip(
                         onClick = {
                             onDismiss()
-                            onRevisionPrompt?.invoke("Сделай стиль текста более деловым и формальным:\n\n$content")
+                            onRevisionPrompt?.invoke(
+                                "👔 Деловой стиль для «$docTitle»",
+                                "Сделай стиль текста более деловым и формальным:\n\n$content"
+                            )
                         },
                         label = { Text("👔 Деловой стиль", fontSize = 12.sp) }
                     )
                     SuggestionChip(
                         onClick = {
                             onDismiss()
-                            onRevisionPrompt?.invoke("Перепиши и улучши архитектуру/структуру этого документа:\n\n```${document.language ?: ""}\n$content\n```")
+                            onRevisionPrompt?.invoke(
+                                "🔄 Переписать «$docTitle»",
+                                "Перепиши и улучши архитектуру/структуру этого документа:\n\n```${document.language ?: ""}\n$content\n```"
+                            )
                         },
                         label = { Text("🔄 Переписать", fontSize = 12.sp) }
                     )

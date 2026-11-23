@@ -128,7 +128,6 @@ fun MainScreen(
     var convoToMoveToNotebook by remember { mutableStateOf<Conversation?>(null) }
     var notebookToRename by remember { mutableStateOf<Notebook?>(null) }
     var notebookToDelete by remember { mutableStateOf<Notebook?>(null) }
-    val speechToTextManager = remember { com.gemini.hw.nativeapp.audio.SpeechToTextManager(context) }
 
     androidx.activity.compose.BackHandler(enabled = currentNotebook != null) {
         if (currentConvoId != null || messages.isNotEmpty()) {
@@ -422,39 +421,7 @@ fun MainScreen(
                     Text("Новый чат")
                 }
 
-                Spacer(modifier = Modifier.height(12.dp))
-                HorizontalDivider()
-
-                NavigationDrawerItem(
-                    label = { Text("Боты (Gems)") },
-                    icon = { Icon(Icons.Default.AutoAwesome, contentDescription = null) },
-                    selected = false,
-                    onClick = {
-                        coroutineScope.launch { drawerState.close() }
-                        showGemsDialog = true
-                    }
-                )
-
-                NavigationDrawerItem(
-                    label = { Text("Запланированное") },
-                    icon = { Icon(Icons.Default.Schedule, contentDescription = null) },
-                    selected = false,
-                    onClick = {
-                        coroutineScope.launch { drawerState.close() }
-                        showScheduledDialog = true
-                    }
-                )
-
-                NavigationDrawerItem(
-                    label = { Text("Задачи (Spark)") },
-                    icon = { Icon(Icons.Default.Work, contentDescription = null) },
-                    selected = false,
-                    onClick = {
-                        coroutineScope.launch { drawerState.close() }
-                        showSparkDialog = true
-                    }
-                )
-
+                Spacer(modifier = Modifier.height(8.dp))
                 HorizontalDivider()
                 Spacer(modifier = Modifier.height(4.dp))
 
@@ -743,6 +710,7 @@ fun MainScreen(
                         selectedModel = selectedModel,
                         thinkingLevel = thinkingLevel,
                         isLoading = isLoading,
+                        isTranscribing = isTranscribing,
                         isRefreshing = isRefreshingNb,
                         onRefresh = { viewModel.loadNotebookConversations(currentNotebook!!.id) },
                         onRenameNotebook = { newTitle -> viewModel.renameNotebook(currentNotebook!!.id, newTitle) },
@@ -757,6 +725,9 @@ fun MainScreen(
                         },
                         onSendMessage = { prompt ->
                             viewModel.startChatInNotebook(currentNotebook!!, prompt)
+                        },
+                        onTranscribeVoice = { file, onResult, onError ->
+                            viewModel.transcribeVoiceAudio(file, onResult, onError)
                         },
                         onAddSourcesClick = {
                             showAddSourceDialog = true
@@ -819,30 +790,6 @@ fun MainScreen(
                     tonalElevation = 2.dp
                 ) {
                     Column {
-                        if (isRecordingVoice) {
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(horizontal = 16.dp, vertical = 8.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.SpaceBetween
-                            ) {
-                                Text(
-                                    "🔴 Запись голоса...",
-                                    color = MaterialTheme.colorScheme.error,
-                                    style = MaterialTheme.typography.bodyMedium
-                                )
-                                Button(
-                                    onClick = { viewModel.stopVoiceRecording() },
-                                    colors = ButtonDefaults.buttonColors(
-                                        containerColor = MaterialTheme.colorScheme.error
-                                    )
-                                ) {
-                                    Text("Остановить и отправить")
-                                }
-                            }
-                        }
-
                         // Pending attachments preview bar
                         if (pendingAttachments.isNotEmpty()) {
                             Row(
@@ -917,7 +864,16 @@ fun MainScreen(
                             OutlinedTextField(
                                 value = inputText,
                                 onValueChange = { inputText = it },
-                                placeholder = { Text("Спросить Gemini", fontSize = 14.sp) },
+                                placeholder = {
+                                    Text(
+                                        when {
+                                            isVoiceListening -> "Говорите..."
+                                            isTranscribing -> "Распознавание речи..."
+                                            else -> "Спросить Gemini"
+                                        },
+                                        fontSize = 14.sp
+                                    )
+                                },
                                 modifier = Modifier
                                     .weight(1f)
                                     .clip(RoundedCornerShape(24.dp)),
@@ -935,23 +891,28 @@ fun MainScreen(
                                 onClick = {
                                     if (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
                                         if (isVoiceListening) {
-                                            speechToTextManager.stopListening()
                                             isVoiceListening = false
-                                        } else {
-                                            speechToTextManager.startListening(
-                                                onPartialText = { partial ->
-                                                    inputText = partial
-                                                },
-                                                onFinalText = { final ->
-                                                    inputText = final
-                                                    isVoiceListening = false
-                                                },
-                                                onError = { err ->
-                                                    isVoiceListening = false
-                                                    Toast.makeText(context, err, Toast.LENGTH_SHORT).show()
-                                                }
-                                            )
-                                            isVoiceListening = true
+                                            val audioFile = voiceInputManager.stopRecording()
+                                            if (audioFile != null) {
+                                                viewModel.transcribeVoiceAudio(
+                                                    file = audioFile,
+                                                    onResult = { recognized ->
+                                                        if (recognized.isNotBlank()) {
+                                                            inputText = if (inputText.isBlank()) recognized else "$inputText $recognized"
+                                                        }
+                                                    },
+                                                    onError = { err ->
+                                                        Toast.makeText(context, err, Toast.LENGTH_SHORT).show()
+                                                    }
+                                                )
+                                            }
+                                        } else if (!isTranscribing) {
+                                            val started = voiceInputManager.startRecording { err ->
+                                                Toast.makeText(context, err, Toast.LENGTH_SHORT).show()
+                                            }
+                                            if (started) {
+                                                isVoiceListening = true
+                                            }
                                         }
                                     } else {
                                         permissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
@@ -961,7 +922,7 @@ fun MainScreen(
                                     .size(42.dp)
                                     .clip(CircleShape)
                                     .background(
-                                        if (isVoiceListening) MaterialTheme.colorScheme.error 
+                                        if (isVoiceListening) MaterialTheme.colorScheme.error
                                         else MaterialTheme.colorScheme.surfaceVariant
                                     )
                             ) {
@@ -1095,10 +1056,14 @@ fun MainScreen(
             document = doc,
             onDismiss = { viewModel.closeCanvas() },
             onSave = { updated ->
-                viewModel.sendMessage("Обнови документ: $updated")
+                viewModel.reviseCanvasDocument(
+                    doc,
+                    "💾 Сохранены правки в «${doc.title.ifBlank { "документ" }}»",
+                    "Обнови документ «${doc.title}»:\n\n$updated"
+                )
             },
-            onRevisionPrompt = { prompt ->
-                viewModel.sendMessage(prompt)
+            onRevisionPrompt = { displayPrompt, fullServerPrompt ->
+                viewModel.reviseCanvasDocument(doc, displayPrompt, fullServerPrompt)
             }
         )
     }
@@ -1265,7 +1230,7 @@ fun MainScreen(
             notebookTitle = currentNotebook!!.title,
             onDismiss = { showAddSourceDialog = false },
             onAddSource = { text ->
-                viewModel.addNotebook(currentNotebook!!.title, text)
+                viewModel.addSourceToCurrentNotebook(text)
                 Toast.makeText(context, "Источник добавлен в блокнот", Toast.LENGTH_SHORT).show()
             }
         )
@@ -1316,6 +1281,7 @@ fun NotebookView(
     selectedModel: GeminiModel?,
     thinkingLevel: String,
     isLoading: Boolean,
+    isTranscribing: Boolean = false,
     isRefreshing: Boolean = false,
     onRefresh: () -> Unit = {},
     onRenameNotebook: (String) -> Unit = {},
@@ -1325,6 +1291,7 @@ fun NotebookView(
     onSelectConversation: (String) -> Unit,
     onConversationLongClick: (Conversation) -> Unit,
     onSendMessage: (String) -> Unit,
+    onTranscribeVoice: (java.io.File, (String) -> Unit, (String) -> Unit) -> Unit = { _, _, _ -> },
     onAddSourcesClick: () -> Unit
 ) {
     var inputText by remember { mutableStateOf("") }
@@ -1333,12 +1300,12 @@ fun NotebookView(
     var showRenameDialog by remember { mutableStateOf(false) }
     var showDeleteDialog by remember { mutableStateOf(false) }
     val context = LocalContext.current
-    val speechToTextManager = remember { com.gemini.hw.nativeapp.audio.SpeechToTextManager(context) }
+    val voiceInputManager = remember { VoiceInputManager(context) }
     var isListeningVoice by remember { mutableStateOf(false) }
 
     DisposableEffect(Unit) {
         onDispose {
-            speechToTextManager.stopListening()
+            voiceInputManager.cancelRecording()
         }
     }
 
@@ -1610,7 +1577,11 @@ fun NotebookView(
                     decorationBox = { innerTextField ->
                         if (inputText.isEmpty()) {
                             Text(
-                                "Спросить Gemini",
+                                when {
+                                    isListeningVoice -> "Говорите..."
+                                    isTranscribing -> "Распознавание речи..."
+                                    else -> "Спросить Gemini"
+                                },
                                 style = MaterialTheme.typography.bodyLarge,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
                             )
@@ -1666,24 +1637,31 @@ fun NotebookView(
 
                 IconButton(
                     onClick = {
-                        if (isListeningVoice) {
-                            speechToTextManager.stopListening()
-                            isListeningVoice = false
-                        } else {
-                            speechToTextManager.startListening(
-                                onPartialText = { partial ->
-                                    inputText = partial
-                                },
-                                onFinalText = { final ->
-                                    inputText = final
-                                    isListeningVoice = false
-                                },
-                                onError = { err ->
-                                    isListeningVoice = false
-                                    android.widget.Toast.makeText(context, err, android.widget.Toast.LENGTH_SHORT).show()
+                        if (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
+                            if (isListeningVoice) {
+                                isListeningVoice = false
+                                val file = voiceInputManager.stopRecording()
+                                if (file != null) {
+                                    onTranscribeVoice(
+                                        file,
+                                        { recognized ->
+                                            if (recognized.isNotBlank()) {
+                                                inputText = if (inputText.isBlank()) recognized else "$inputText $recognized"
+                                            }
+                                        },
+                                        { err ->
+                                            Toast.makeText(context, err, Toast.LENGTH_SHORT).show()
+                                        }
+                                    )
                                 }
-                            )
-                            isListeningVoice = true
+                            } else if (!isTranscribing) {
+                                val ok = voiceInputManager.startRecording { err ->
+                                    Toast.makeText(context, err, Toast.LENGTH_SHORT).show()
+                                }
+                                if (ok) isListeningVoice = true
+                            }
+                        } else {
+                            Toast.makeText(context, "Требуется разрешение на запись звука", Toast.LENGTH_SHORT).show()
                         }
                     },
                     modifier = Modifier.size(36.dp)

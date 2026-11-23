@@ -63,14 +63,11 @@ fun GeminiLiveDialog(
         label = "idleScale"
     )
 
-    // Function to start listening for user voice
+    // Function to start listening for user voice (recording itself is triggered by LaunchedEffect)
     fun startListeningCycle() {
         if (isMicPaused) return
         liveState = LiveState.LISTENING
         userSubtitle = "Слушаю вас..."
-        voiceInputManager.startRecording { err ->
-            userSubtitle = "Ошибка микрофона: $err"
-        }
     }
 
     // Function to finish utterance and send to Gemini
