@@ -484,7 +484,16 @@ class GeminiWebClient(
 
                                 var canvasDoc: CanvasDocument? = null
                                 val cand30 = firstCandidate?.optJSONArray(30)
-                                Log.w("GeminiWebClient", "stream cand len=${firstCandidate?.length()} c30=${cand30?.toString()?.take(300)} c30null=${firstCandidate?.isNull(30)}")
+                                if (firstCandidate != null) {
+                                    for (ci in 2 until firstCandidate.length()) {
+                                        if (!firstCandidate.isNull(ci)) {
+                                            val cs = firstCandidate.opt(ci).toString()
+                                            if (cs.contains("html", ignoreCase = true) || cs.contains("button", ignoreCase = true)) {
+                                                Log.w("GeminiWebClient", "CANVASIDX $ci len=${cs.length} head=${cs.take(260)}")
+                                            }
+                                        }
+                                    }
+                                }
                                 if (cand30 != null && cand30.length() > 0) {
                                     val cItem = cand30.optJSONArray(0)
                                     if (cItem != null) {
