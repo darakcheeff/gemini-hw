@@ -491,10 +491,20 @@ class GeminiWebClient(
                                         val docTitle = cItem.optString(2, "Документ Canvas")
                                         val docFileName = cItem.optString(9, "")
                                         val docArr = cItem.optJSONArray(19)
-                                        val docContent = if (docArr != null && docArr.length() > 0) {
-                                            docArr.optString(docArr.length() - 1, "")
-                                        } else {
-                                            cItem.optString(19, "")
+                                        var docContent = ""
+                                        if (docArr != null) {
+                                            for (idx in (docArr.length() - 1) downTo 0) {
+                                                if (!docArr.isNull(idx)) {
+                                                    val s = docArr.optString(idx, "")
+                                                    if (s.isNotBlank() && s != "null") {
+                                                        docContent = s
+                                                        break
+                                                    }
+                                                }
+                                            }
+                                        } else if (!cItem.isNull(19)) {
+                                            val s = cItem.optString(19, "")
+                                            if (s.isNotBlank() && s != "null") docContent = s
                                         }
                                         if (docContent.isNotBlank()) {
                                             canvasDoc = CanvasDocument(
@@ -935,10 +945,20 @@ class GeminiWebClient(
                                                             val docTitle = cItem.optString(2, "Документ Canvas")
                                                             val docFileName = cItem.optString(9, "")
                                                             val docArr = cItem.optJSONArray(19)
-                                        val docContent = if (docArr != null && docArr.length() > 0) {
-                                            docArr.optString(docArr.length() - 1, "")
-                                        } else {
-                                            cItem.optString(19, "")
+                                        var docContent = ""
+                                        if (docArr != null) {
+                                            for (idx in (docArr.length() - 1) downTo 0) {
+                                                if (!docArr.isNull(idx)) {
+                                                    val s = docArr.optString(idx, "")
+                                                    if (s.isNotBlank() && s != "null") {
+                                                        docContent = s
+                                                        break
+                                                    }
+                                                }
+                                            }
+                                        } else if (!cItem.isNull(19)) {
+                                            val s = cItem.optString(19, "")
+                                            if (s.isNotBlank() && s != "null") docContent = s
                                         }
                                                             if (docContent.isNotBlank()) {
                                                                 canvasDoc = CanvasDocument(

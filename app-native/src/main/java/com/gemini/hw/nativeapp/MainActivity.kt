@@ -636,38 +636,54 @@ fun MainScreen(
                             ) else null)
 
                         if (activeConvo != null && (currentConvoId != null || messages.isNotEmpty())) {
-                            IconButton(onClick = {
-                                val title = activeConvo.title
-                                val convoId = currentConvoId ?: activeConvo.id
-                                val url = if (convoId.isNotBlank() && !convoId.startsWith("new")) "\nhttps://gemini.google.com/app/$convoId" else ""
-                                val sendIntent = Intent(Intent.ACTION_SEND).apply {
-                                    putExtra(Intent.EXTRA_TEXT, "Диалог: $title$url")
-                                    type = "text/plain"
+                            var showTopBarConvoMenu by remember { mutableStateOf(false) }
+                            Box {
+                                IconButton(onClick = { showTopBarConvoMenu = true }) {
+                                    Icon(Icons.Default.MoreVert, contentDescription = "Действия с чатом")
                                 }
-                                context.startActivity(Intent.createChooser(sendIntent, "Поделиться диалогом"))
-                            }) {
-                                Icon(Icons.Default.Share, contentDescription = "Поделиться")
-                            }
-
-                            IconButton(onClick = {
-                                convoToRename = activeConvo
-                            }) {
-                                Icon(Icons.Default.Edit, contentDescription = "Переименовать")
-                            }
-
-                            IconButton(onClick = {
-                                val convoId = currentConvoId ?: activeConvo.id
-                                if (convoId.isNotBlank() && !convoId.startsWith("new")) {
-                                    viewModel.deleteConversation(convoId)
-                                } else {
-                                    if (currentNotebook != null) {
-                                        viewModel.closeNotebookChat()
-                                    } else {
-                                        viewModel.startNewChat()
-                                    }
+                                DropdownMenu(
+                                    expanded = showTopBarConvoMenu,
+                                    onDismissRequest = { showTopBarConvoMenu = false }
+                                ) {
+                                    DropdownMenuItem(
+                                        text = { Text("Поделиться") },
+                                        leadingIcon = { Icon(Icons.Default.Share, contentDescription = null) },
+                                        onClick = {
+                                            showTopBarConvoMenu = false
+                                            val title = activeConvo.title
+                                            val convoId = currentConvoId ?: activeConvo.id
+                                            val url = if (convoId.isNotBlank() && !convoId.startsWith("new")) "\nhttps://gemini.google.com/app/$convoId" else ""
+                                            val sendIntent = Intent(Intent.ACTION_SEND).apply {
+                                                putExtra(Intent.EXTRA_TEXT, "Диалог: $title$url")
+                                                type = "text/plain"
+                                            }
+                                            context.startActivity(Intent.createChooser(sendIntent, "Поделиться диалогом"))
+                                        }
+                                    )
+                                    DropdownMenuItem(
+                                        text = { Text("Переименовать") },
+                                        leadingIcon = { Icon(Icons.Default.Edit, contentDescription = null) },
+                                        onClick = {
+                                            showTopBarConvoMenu = false
+                                            convoToRename = activeConvo
+                                        }
+                                    )
+                                    DropdownMenuItem(
+                                        text = { Text("Удалить", color = MaterialTheme.colorScheme.error) },
+                                        leadingIcon = { Icon(Icons.Default.Delete, contentDescription = null, tint = MaterialTheme.colorScheme.error) },
+                                        onClick = {
+                                            showTopBarConvoMenu = false
+                                            val convoId = currentConvoId ?: activeConvo.id
+                                            if (convoId.isNotBlank() && !convoId.startsWith("new")) {
+                                                viewModel.deleteConversation(convoId)
+                                            } else if (currentNotebook != null) {
+                                                viewModel.closeNotebookChat()
+                                            } else {
+                                                viewModel.startNewChat()
+                                            }
+                                        }
+                                    )
                                 }
-                            }) {
-                                Icon(Icons.Default.Delete, contentDescription = "Удалить")
                             }
                         }
 

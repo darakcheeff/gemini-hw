@@ -234,6 +234,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val _notebookConversations = MutableStateFlow<Map<String, List<Conversation>>>(emptyMap())
     val notebookConversations: StateFlow<Map<String, List<Conversation>>> = _notebookConversations.asStateFlow()
 
+    private val _recentlyAttachedNotebookConvos = java.util.concurrent.ConcurrentHashMap<String, List<Conversation>>()
+
     private val _isRefreshingNotebook = MutableStateFlow(false)
     val isRefreshingNotebook: StateFlow<Boolean> = _isRefreshingNotebook.asStateFlow()
 
@@ -254,11 +256,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 val res = client.getNotebookConversations(targetId)
                 if (res.isSuccess) {
                     val serverList = res.getOrThrow()
-                    val finalList = if (_isLoading.value) {
-                        (serverList + combined).distinctBy { it.id }
+                    val serverIds = serverList.map { it.id }.toSet()
+                    val pending = (_recentlyAttachedNotebookConvos[targetId] ?: emptyList())
+                        .filter { it.id !in serverIds }
+                    if (pending.isEmpty()) {
+                        _recentlyAttachedNotebookConvos.remove(targetId)
                     } else {
-                        serverList
+                        _recentlyAttachedNotebookConvos[targetId] = pending
                     }
+                    val finalList = (pending + serverList).distinctBy { it.id }
                     _notebookConversations.value = _notebookConversations.value + (targetId to finalList) + (rawId to finalList)
                 }
             } catch (_: Exception) {}
@@ -348,6 +354,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         _notebookConversations.value = _notebookConversations.value.mapValues { (k, list) ->
             if (k == targetNorm || k == rawId) list.filter { it.id != conversationId } else list
         }
+        _recentlyAttachedNotebookConvos[targetNorm] = (_recentlyAttachedNotebookConvos[targetNorm] ?: emptyList())
+            .filter { it.id != conversationId }
         viewModelScope.launch {
             try { client.removeConversationFromNotebook(conversationId, targetNorm) } catch (_: Exception) {}
             refreshConversations()
@@ -377,6 +385,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         _conversations.value = _conversations.value.filter { it.id != conversationId }
         _notebookConversations.value = _notebookConversations.value.mapValues { (_, list) ->
             list.filter { it.id != conversationId }
+        }
+        _recentlyAttachedNotebookConvos.keys.forEach { k ->
+            _recentlyAttachedNotebookConvos[k] = (_recentlyAttachedNotebookConvos[k] ?: emptyList())
+                .filter { it.id != conversationId }
         }
         if (_currentConversationId.value == conversationId) {
             _currentConversationId.value = null
@@ -556,6 +568,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                             val existingList = _notebookConversations.value[targetNorm] ?: _notebookConversations.value[rawId] ?: emptyList()
                             val updatedList = (listOf(newConvo) + existingList).distinctBy { it.id }
                             _notebookConversations.value = _notebookConversations.value + (targetNorm to updatedList) + (rawId to updatedList)
+                            val prevPending = _recentlyAttachedNotebookConvos[targetNorm] ?: emptyList()
+                            _recentlyAttachedNotebookConvos[targetNorm] = (listOf(newConvo) + prevPending).distinctBy { it.id }
                         }
                     }
                 }
@@ -564,18 +578,32 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 val lastMsg = _messages.value.lastOrNull { it.role == MessageRole.MODEL }
                 if (lastMsg?.canvas != null) {
                     _activeCanvas.value = lastMsg.canvas
-                } else if (_isCanvasMode.value && lastResponseText.isNotBlank()) {
-                    val codeMatch = Regex("""```([a-zA-Z0-9_\-+]*)\n([\s\S]*?)```""").find(lastResponseText)
-                    if (codeMatch != null) {
-                        val lang = codeMatch.groupValues[1]
-                        val code = codeMatch.groupValues[2]
-                        _activeCanvas.value = CanvasDocument(
-                            id = "canvas_${System.currentTimeMillis()}",
-                            title = "Документ Canvas (${lang.ifBlank { "код" }})",
-                            content = code,
-                            language = lang,
-                            version = 1
-                        )
+                } else if (_isCanvasMode.value) {
+                    val activeCid = _currentConversationId.value
+                    var resolvedCanvas: CanvasDocument? = null
+                    if (!activeCid.isNullOrBlank() && activeCid.startsWith("c_")) {
+                        val hRes = client.getConversationMessages(activeCid)
+                        val hMsgs = hRes.getOrNull()
+                        val hCanvas = hMsgs?.lastOrNull { it.role == MessageRole.MODEL }?.canvas
+                        if (hCanvas != null) {
+                            _messages.value = hMsgs
+                            resolvedCanvas = hCanvas
+                            _activeCanvas.value = hCanvas
+                        }
+                    }
+                    if (resolvedCanvas == null && lastResponseText.isNotBlank()) {
+                        val codeMatch = Regex("""```([a-zA-Z0-9_\-+]*)\n([\s\S]*?)```""").find(lastResponseText)
+                        if (codeMatch != null) {
+                            val lang = codeMatch.groupValues[1]
+                            val code = codeMatch.groupValues[2]
+                            _activeCanvas.value = CanvasDocument(
+                                id = "canvas_${System.currentTimeMillis()}",
+                                title = "Документ Canvas (${lang.ifBlank { "код" }})",
+                                content = code,
+                                language = lang,
+                                version = 1
+                            )
+                        }
                     }
                 }
 
