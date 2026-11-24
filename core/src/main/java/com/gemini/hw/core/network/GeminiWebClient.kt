@@ -437,12 +437,13 @@ class GeminiWebClient(
                             if (candidates != null && candidates.length() > 0) {
                                 val firstCandidate = candidates.optJSONArray(0)
                                 val textParts = firstCandidate?.optJSONArray(1)
-                                var replyChunk = textParts?.optString(0, "") ?: ""
-                                replyChunk = sanitizeModelText(replyChunk)
+                                var replyChunk = sanitizeModelText(textParts?.optString(0, "") ?: "")
 
-                                val extractedThoughts = firstCandidate?.optJSONArray(37)?.optJSONArray(0)?.optString(0, "")
+                                val rawThoughts = firstCandidate?.optJSONArray(37)?.optJSONArray(0)?.optString(0, "")
                                     ?.ifBlank { null }
                                     ?: firstCandidate?.optJSONArray(37)?.optString(0, "")?.ifBlank { null }
+                                val (cleanReply, extractedThoughts) = extractToolCodeBlocks(replyChunk, rawThoughts)
+                                replyChunk = cleanReply
 
                                 val generatedAttachments = mutableListOf<Attachment>()
 
@@ -452,10 +453,10 @@ class GeminiWebClient(
                                             inspectForImages(obj.opt(idx))
                                         }
                                     } else if (obj is String) {
+                                        // Only keep genuine Imagen generated URLs; skip service icons/logos (gstatic, google.com, etc.)
                                         if (obj.startsWith("https://lh3.googleusercontent.com/gg-dl/") ||
-                                            obj.startsWith("https://lh3.googleusercontent.com/") ||
-                                            obj.contains("work.fife.usercontent.google.com") ||
-                                            (obj.startsWith("https://") && (obj.endsWith(".jpg") || obj.endsWith(".png") || obj.endsWith(".jpeg") || obj.endsWith(".webp")))) {
+                                            obj.startsWith("https://lh3.googleusercontent.com/gg/") ||
+                                            obj.contains("work.fife.usercontent.google.com")) {
                                             if (generatedAttachments.none { it.url == obj }) {
                                                 generatedAttachments.add(
                                                     Attachment(
@@ -484,16 +485,6 @@ class GeminiWebClient(
 
                                 var canvasDoc: CanvasDocument? = null
                                 val cand30 = firstCandidate?.optJSONArray(30)
-                                if (firstCandidate != null) {
-                                    for (ci in 2 until firstCandidate.length()) {
-                                        if (!firstCandidate.isNull(ci)) {
-                                            val cs = firstCandidate.opt(ci).toString()
-                                            if (cs.contains("html", ignoreCase = true) || cs.contains("button", ignoreCase = true)) {
-                                                Log.w("GeminiWebClient", "CANVASIDX $ci len=${cs.length} head=${cs.take(260)}")
-                                            }
-                                        }
-                                    }
-                                }
                                 if (cand30 != null && cand30.length() > 0) {
                                     val cItem = cand30.optJSONArray(0)
                                     if (cItem != null) {
@@ -948,7 +939,6 @@ class GeminiWebClient(
                                                         ?.ifBlank { null }
                                                         ?: firstCand.optJSONArray(37)?.optString(0, "")?.ifBlank { null }
                                                     val cand30 = firstCand.optJSONArray(30)
-                                                    Log.w("GeminiWebClient", "hist cand len=${firstCand.length()} c30=${cand30?.toString()?.take(300)}")
                                                     if (cand30 != null && cand30.length() > 0) {
                                                         val cItem = cand30.optJSONArray(0)
                                                         if (cItem != null) {
@@ -995,7 +985,10 @@ class GeminiWebClient(
                                                         } else {
                                                             m3
                                                         }
-                                                        modelText = sanitizeModelText(replaced)
+                                                        val sanitized = sanitizeModelText(replaced)
+                                                        val (cleanModelText, combinedThoughts) = extractToolCodeBlocks(sanitized, modelThoughts)
+                                                        modelText = cleanModelText
+                                                        modelThoughts = combinedThoughts
                                                         break
                                                     }
                                                 }
@@ -1830,6 +1823,29 @@ class GeminiWebClient(
                 .replace(Regex("""https?://googleusercontent\.com/immersive_entry_chip/\d+"""), "")
                 .replace(Regex("""\n{3,}"""), "\n\n")
                 .trim()
+        }
+
+        private val TOOL_CODE_BLOCK_REGEX = Regex(
+            """```[^\n]*\?code_(?:reference|stdout)[^\n]*\n[\s\S]*?```"""
+        )
+
+        /**
+         * Moves Gemini's internal code-execution blocks (python?code_reference, text?code_stdout)
+         * out of the main response text into the collapsible thoughts section.
+         */
+        internal fun extractToolCodeBlocks(rawText: String, existingThoughts: String?): Pair<String, String?> {
+            val matches = TOOL_CODE_BLOCK_REGEX.findAll(rawText).map { it.value.trim() }.toList()
+            if (matches.isEmpty()) return rawText to existingThoughts
+            val cleanedText = TOOL_CODE_BLOCK_REGEX.replace(rawText, "")
+                .replace(Regex("""\n{3,}"""), "\n\n")
+                .trim()
+            val toolSection = matches.joinToString("\n\n")
+            val combinedThoughts = if (existingThoughts.isNullOrBlank()) {
+                toolSection
+            } else {
+                "${existingThoughts.trim()}\n\n$toolSection"
+            }
+            return cleanedText to combinedThoughts
         }
 
         private val PATTERN_SNLM0E = Pattern.compile("\"SNlM0e\":\"([^\"]+)\"")

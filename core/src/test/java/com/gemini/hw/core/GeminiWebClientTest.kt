@@ -146,6 +146,26 @@ class GeminiWebClientTest {
         assertFalse(cleaned.contains("immersive_entry_chip"))
         assertEquals("Презентация готова!\n\nПосмотрите слайды.", cleaned)
     }
+
+    @Test
+    fun testExtractToolCodeBlocksMovesPythonAndStdoutToThoughts() {
+        val raw = """```python?code_reference&code_event_index=1
+steps = 1350 * 5
+print(steps)
+```
+
+```text?code_stdout&code_event_index=1
+6750
+```
+
+TL;DR: Примерно 6 750 шагов."""
+        val (cleanText, combinedThoughts) = GeminiWebClient.extractToolCodeBlocks(raw, "Думаю...")
+        assertEquals("TL;DR: Примерно 6 750 шагов.", cleanText)
+        assertNotNull(combinedThoughts)
+        assertTrue(combinedThoughts!!.contains("Думаю..."))
+        assertTrue(combinedThoughts.contains("python?code_reference"))
+        assertTrue(combinedThoughts.contains("6750"))
+    }
 }
 
 class MockAuthRepository : AuthRepository(null) {

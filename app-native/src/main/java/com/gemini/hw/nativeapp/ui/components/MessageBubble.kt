@@ -83,9 +83,9 @@ fun MessageBubble(
                         }
                     }
                 } else {
-                    // Collapsible Thoughts block if present
+                    // Collapsible Thoughts block if present (always collapsed by default)
                     if (!isUser && !message.thoughts.isNullOrBlank()) {
-                        var showThoughts by remember { mutableStateOf(false) }
+                        var showThoughts by remember(message.id) { mutableStateOf(false) }
                         Surface(
                             onClick = { showThoughts = !showThoughts },
                             shape = RoundedCornerShape(8.dp),
