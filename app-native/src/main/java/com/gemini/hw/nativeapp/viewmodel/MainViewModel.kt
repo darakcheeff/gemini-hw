@@ -843,7 +843,17 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             val convoId = _currentConversationId.value ?: return@launch
             val originalTitle = _conversations.value.firstOrNull { it.id == convoId }?.title ?: "Диалог"
-            val res = client.createBranchInNewChat(convoId, message.responseId?.takeIf { it.isNotBlank() } ?: message.id)
+            // Local messages carry client-generated ids; KDNZr needs the server turn id (r_...).
+            var serverTurnId: String? = message.responseId?.takeIf { it.startsWith("r_") }
+            if (serverTurnId == null && message.id.removePrefix("u_").removePrefix("m_").startsWith("r_")) {
+                serverTurnId = message.id
+            }
+            if (serverTurnId == null) {
+                val hist = client.getConversationMessages(convoId).getOrNull().orEmpty()
+                val pos = if (targetIndex >= 0) targetIndex else hist.lastIndex
+                serverTurnId = hist.getOrNull(pos.coerceAtMost(hist.lastIndex))?.id
+            }
+            val res = client.createBranchInNewChat(convoId, serverTurnId ?: message.id)
             if (res.isSuccess) {
                 val returnedConvo = res.getOrThrow()
                 val branchTitle = if (returnedConvo.title.isNotBlank() && returnedConvo.title != "Ветвь чата") {
