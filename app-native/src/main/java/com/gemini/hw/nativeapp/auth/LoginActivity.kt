@@ -70,7 +70,7 @@ class LoginActivity : ComponentActivity() {
             setPadding(16, 8, 16, 8)
             setOnClickListener {
                 try {
-                    val intent = Intent(Intent.ACTION_VIEW, Uri.parse("https://gemini.google.com/app")).apply {
+                    val intent = Intent(Intent.ACTION_VIEW, Uri.parse(LOGIN_URL)).apply {
                         addCategory(Intent.CATEGORY_BROWSABLE)
                         addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                     }
