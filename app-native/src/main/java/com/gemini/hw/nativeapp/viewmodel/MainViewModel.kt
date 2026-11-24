@@ -843,7 +843,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             val convoId = _currentConversationId.value ?: return@launch
             val originalTitle = _conversations.value.firstOrNull { it.id == convoId }?.title ?: "Диалог"
-            val res = client.createBranchInNewChat(convoId, message.id)
+            val res = client.createBranchInNewChat(convoId, message.responseId?.takeIf { it.isNotBlank() } ?: message.id)
             if (res.isSuccess) {
                 val returnedConvo = res.getOrThrow()
                 val branchTitle = if (returnedConvo.title.isNotBlank() && returnedConvo.title != "Ветвь чата") {
