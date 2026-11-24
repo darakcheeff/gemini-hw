@@ -159,7 +159,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 }
                 refreshNotebooks()
             } else {
-                _errorMessage.value = res.exceptionOrNull()?.message ?: "Не удалось создать блокнот"
+                android.widget.Toast.makeText(
+                    getApplication(),
+                    res.exceptionOrNull()?.message ?: "Не удалось создать блокнот",
+                    android.widget.Toast.LENGTH_SHORT
+                ).show()
             }
             _isLoading.value = false
         }
@@ -853,7 +857,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 _messages.value = historyToCopy.map { it.copy(conversationId = branchedConvo.id) }
                 refreshConversations()
             } else {
-                _errorMessage.value = res.exceptionOrNull()?.message ?: "Не удалось создать ветвь чата"
+                android.widget.Toast.makeText(
+                    getApplication(),
+                    res.exceptionOrNull()?.message ?: "Не удалось создать ветвь чата",
+                    android.widget.Toast.LENGTH_SHORT
+                ).show()
             }
         }
     }
