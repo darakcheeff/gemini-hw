@@ -36,6 +36,8 @@ class GeminiWebClient(
     var cachedPctx: String? = null
         internal set
 
+    var webViewTokenRefresher: (suspend () -> Boolean)? = null
+
     val conversationContextMap = java.util.concurrent.ConcurrentHashMap<String, Pair<String?, String?>>()
 
     private var reqIdCounter = 100000
@@ -71,18 +73,23 @@ class GeminiWebClient(
                 val finalUrl = response.request.url.toString()
                 val html = response.body?.string() ?: ""
                 if (finalUrl.contains("accounts.google.com") || html.contains("boq_identityfrontendauthuiserver")) {
-                    Log.e("GeminiWebClient", "Redirected to accounts.google.com ($finalUrl), session cookies expired/incomplete")
-                    cachedSnlm0e = null
-                    cachedFdrFJe = null
-                    cachedBuildLabel = null
-                    return@withContext Result.failure(IllegalStateException("Требуется повторный вход в аккаунт Google"))
+                    Log.w("GeminiWebClient", "Redirected to accounts.google.com ($finalUrl), trying WebView token refresh...")
+                    val refreshed = try { webViewTokenRefresher?.invoke() ?: false } catch (_: Exception) { false }
+                    if (!refreshed || cachedSnlm0e.isNullOrBlank()) {
+                        cachedSnlm0e = null
+                        cachedFdrFJe = null
+                        cachedBuildLabel = null
+                        return@withContext Result.failure(IllegalStateException("Требуется повторный вход в аккаунт Google"))
+                    }
+                } else {
+                    extractTokensFromHtml(html)
                 }
-                extractTokensFromHtml(html)
                 Log.w("GeminiWebClient", "Tokens extracted: snlm0eLen=${cachedSnlm0e?.length ?: 0}, fsid=${cachedFdrFJe}, bl=${cachedBuildLabel}")
             }
 
             // 1. Fetch live models directly from Google otAQ7b RPC
-            val rpcModels = fetchModelsViaRpc(cookieStr)
+            val refreshedCookie = authRepository.getCookieString()
+            val rpcModels = fetchModelsViaRpc(refreshedCookie)
             if (rpcModels.isNotEmpty()) {
                 return@withContext Result.success(rpcModels)
             }
@@ -136,6 +143,29 @@ class GeminiWebClient(
         val pctxMatcher = PATTERN_PCTX.matcher(html)
         if (pctxMatcher.find()) {
             cachedPctx = pctxMatcher.group(1)
+        }
+    }
+
+    fun applyWizTokensJson(jsonStr: String): Boolean {
+        return try {
+            val clean = jsonStr.trim().removeSurrounding("\"").replace("\\\"", "\"")
+            val obj = JSONObject(clean)
+            val snlm = obj.optString("SNlM0e", "").ifBlank { obj.optString("thykhd", "") }
+            val fsid = obj.optString("FdrFJe", "")
+            val bl = obj.optString("cfb2h", "")
+            val push = obj.optString("qKIAYe", "")
+            val pctx = obj.optString("Ylro7b", "")
+            if (snlm.isNotBlank()) {
+                cachedSnlm0e = snlm
+                authRepository.saveSnlm0eToken(snlm)
+            }
+            if (fsid.isNotBlank()) cachedFdrFJe = fsid
+            if (bl.startsWith("boq_gemini-web-uiserver")) cachedBuildLabel = bl
+            if (push.isNotBlank()) cachedPushId = push
+            if (pctx.isNotBlank()) cachedPctx = pctx
+            snlm.isNotBlank() && cachedBuildLabel != null
+        } catch (_: Exception) {
+            false
         }
     }
 
