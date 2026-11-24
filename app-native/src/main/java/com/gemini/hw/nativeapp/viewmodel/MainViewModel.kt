@@ -156,6 +156,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     gemsAndSparkRepo.addSourceToNotebook(id, content)
                 }
                 refreshNotebooks()
+            } else {
+                _errorMessage.value = res.exceptionOrNull()?.message ?: "Не удалось создать блокнот"
             }
             _isLoading.value = false
         }
@@ -685,6 +687,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
             try {
                 val bytes = audioFile.readBytes()
+                if (bytes.size < 3000) {
+                    _messages.value = _messages.value.filterNot { it.id == userMsgId }
+                    onError("Запись слишком короткая")
+                    return@launch
+                }
                 val uploadRes = client.uploadFile(bytes, "live_voice.m4a", "audio/mp4")
                 if (uploadRes.isFailure) {
                     onError(uploadRes.exceptionOrNull()?.message ?: "Не удалось отправить аудио")
@@ -702,12 +709,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     sizeBytes = bytes.size.toLong()
                 )
 
-                // Transcribe user's voice turn in parallel using the already uploaded audio
+                // Transcribe user's voice turn in parallel using the already uploaded attachment
                 var localTranscript = ""
                 val transcribeJob = viewModelScope.launch {
-                    val tRes = client.transcribeAudio(bytes, "audio/mp4")
+                    val tRes = client.transcribeAttachment(att)
                     val tText = tRes.getOrNull()?.trim().orEmpty()
-                    if (tText.isNotBlank()) {
+                    val lower = tText.lowercase()
+                    val looksLikeRefusal = lower.contains("не прикреплена") ||
+                        lower.contains("прикрепите файл") ||
+                        lower.contains("no audio")
+                    if (tText.isNotBlank() && !looksLikeRefusal) {
                         localTranscript = tText
                         _messages.value = _messages.value.map { m ->
                             if (m.id == userMsgId) m.copy(text = tText) else m
@@ -826,6 +837,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 _currentConversationId.value = branchedConvo.id
                 _messages.value = historyToCopy.map { it.copy(conversationId = branchedConvo.id) }
                 refreshConversations()
+            } else {
+                _errorMessage.value = res.exceptionOrNull()?.message ?: "Не удалось создать ветвь чата"
             }
         }
     }

@@ -1341,21 +1341,41 @@ class GeminiWebClient(
                 val body = res.getOrThrow()
                 var newConvoId = ""
                 var newTitle = ""
-                for (line in body.split("\n")) {
-                    if (line.contains("KDNZr") && line.contains("wrb.fr")) {
-                        val start = line.indexOf("[")
-                        if (start >= 0) {
-                            val chunkArr = JSONArray(line.substring(start))
-                            for (j in 0 until chunkArr.length()) {
-                                val chunk = chunkArr.optJSONArray(j) ?: continue
-                                if (chunk.optString(0) == "wrb.fr" && chunk.optString(1) == "KDNZr") {
-                                    val innerStr = chunk.optString(2, "")
-                                    if (innerStr.isNotBlank() && innerStr != "null") {
-                                        val innerArr = JSONArray(innerStr)
-                                        val convoObj = innerArr.optJSONArray(0)
-                                        if (convoObj != null) {
-                                            newConvoId = convoObj.optString(0, "")
-                                            newTitle = convoObj.optString(1, "")
+                // callBatchexecuteRPC already extracts the inner wrb.fr payload string.
+                try {
+                    val innerArr = JSONArray(body)
+                    val convoObj = innerArr.optJSONArray(0)
+                    if (convoObj != null) {
+                        val candidateId = convoObj.optString(0, "")
+                        if (candidateId.isNotBlank() && candidateId != "null") {
+                            newConvoId = candidateId
+                            val t = convoObj.optString(1, "")
+                            if (t != "null") newTitle = t
+                        }
+                    } else {
+                        val directId = innerArr.optString(0, "")
+                        if (directId.isNotBlank() && directId != "null" && !directId.startsWith("[")) {
+                            newConvoId = directId
+                        }
+                    }
+                } catch (_: Exception) {
+                    // Fallback if raw batchexecute body was returned
+                    for (line in body.split("\n")) {
+                        if (line.contains("KDNZr") && line.contains("wrb.fr")) {
+                            val start = line.indexOf("[")
+                            if (start >= 0) {
+                                val chunkArr = JSONArray(line.substring(start))
+                                for (j in 0 until chunkArr.length()) {
+                                    val chunk = chunkArr.optJSONArray(j) ?: continue
+                                    if (chunk.optString(0) == "wrb.fr" && chunk.optString(1) == "KDNZr") {
+                                        val innerStr = chunk.optString(2, "")
+                                        if (innerStr.isNotBlank() && innerStr != "null") {
+                                            val innerArr = JSONArray(innerStr)
+                                            val convoObj = innerArr.optJSONArray(0)
+                                            if (convoObj != null) {
+                                                newConvoId = convoObj.optString(0, "")
+                                                newTitle = convoObj.optString(1, "")
+                                            }
                                         }
                                     }
                                 }
@@ -1601,16 +1621,27 @@ class GeminiWebClient(
             val res = callBatchexecuteRPC("oMH3Zd", createReq.toString())
             if (res.isSuccess) {
                 val innerStr = res.getOrThrow()
+                Log.w("GeminiWebClient", "oMH3Zd response: ${innerStr.take(300)}")
                 var newId = ""
+                fun extractFirstBotId(obj: Any?): String? {
+                    return when (obj) {
+                        is String -> obj.takeIf { it.isNotBlank() && it != "null" && !it.startsWith("[") }
+                        is JSONArray -> {
+                            for (idx in 0 until obj.length()) {
+                                val found = extractFirstBotId(obj.opt(idx))
+                                if (found != null) return found
+                            }
+                            null
+                        }
+                        else -> null
+                    }
+                }
                 try {
                     val arr = JSONArray(innerStr)
-                    newId = arr.optString(0, "")
-                    if (newId.isEmpty() && arr.length() > 0 && arr.optJSONArray(0) != null) {
-                        newId = arr.optJSONArray(0)?.optString(0, "") ?: ""
-                    }
+                    newId = extractFirstBotId(arr) ?: ""
                 } catch (_: Exception) {}
                 if (newId.isNotBlank()) {
-                    Log.d("GeminiWebClient", "createNotebook success id: $newId")
+                    Log.w("GeminiWebClient", "createNotebook success id: $newId")
                     Result.success(newId)
                 } else {
                     Result.failure(Exception("Сервер не вернул ID созданного блокнота"))
@@ -1731,6 +1762,28 @@ class GeminiWebClient(
      * Transcribes an audio recording autonomously using Gemini's native multimodal audio engine,
      * with zero dependencies on GMS or Google speech services.
      */
+    suspend fun transcribeAttachment(
+        att: Attachment
+    ): Result<String> = withContext(Dispatchers.IO) {
+        try {
+            var recognizedText = ""
+            sendMessageStream(
+                conversationId = null,
+                prompt = "Транскрибируй эту аудиозапись дословно на языке оригинала. Выведи ТОЛЬКО расшифрованный текст без кавычек, без оформления, без пояснений и без дополнительных слов.",
+                modelId = "default",
+                attachments = listOf(att)
+            ).collect { msg ->
+                if (msg.text.isNotBlank()) {
+                    recognizedText = msg.text
+                }
+            }
+            val clean = recognizedText.trim().removeSurrounding("\"").removeSurrounding("'")
+            Result.success(clean)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
     suspend fun transcribeAudio(
         audioBytes: ByteArray,
         mimeType: String = "audio/mp4"
@@ -1748,19 +1801,7 @@ class GeminiWebClient(
                 url = ref,
                 sizeBytes = audioBytes.size.toLong()
             )
-            var recognizedText = ""
-            sendMessageStream(
-                conversationId = null,
-                prompt = "Транскрибируй эту аудиозапись дословно на языке оригинала. Выведи ТОЛЬКО расшифрованный текст без кавычек, без оформления, без пояснений и без дополнительных слов.",
-                modelId = "default",
-                attachments = listOf(att)
-            ).collect { msg ->
-                if (msg.text.isNotBlank()) {
-                    recognizedText = msg.text
-                }
-            }
-            val clean = recognizedText.trim().removeSurrounding("\"").removeSurrounding("'")
-            Result.success(clean)
+            transcribeAttachment(att)
         } catch (e: Exception) {
             Result.failure(e)
         }

@@ -1,11 +1,15 @@
 package com.gemini.hw.nativeapp
 
 import android.app.Application
+import android.webkit.CookieManager
 import coil.ImageLoader
 import coil.ImageLoaderFactory
 import com.gemini.hw.core.auth.AuthRepository
 import com.gemini.hw.core.network.GeminiWebClient
 import com.gemini.hw.core.repository.GemsAndSparkRepository
+import okhttp3.Cookie
+import okhttp3.CookieJar
+import okhttp3.HttpUrl
 import okhttp3.OkHttpClient
 
 class GeminiApp : Application(), ImageLoaderFactory {
@@ -91,21 +95,49 @@ class GeminiApp : Application(), ImageLoaderFactory {
     }
 
     override fun newImageLoader(): ImageLoader {
+        val webViewCookieJar = object : CookieJar {
+            override fun saveFromResponse(url: HttpUrl, cookies: List<Cookie>) {
+                val cm = CookieManager.getInstance()
+                for (cookie in cookies) {
+                    cm.setCookie(url.toString(), cookie.toString())
+                }
+            }
+
+            override fun loadForRequest(url: HttpUrl): List<Cookie> {
+                val urlStr = url.toString()
+                val cm = CookieManager.getInstance()
+                val raw = cm.getCookie(urlStr)
+                    ?: if (url.host.contains("google") || url.host.contains("ggpht")) {
+                        authRepository.getCookieString()
+                    } else null
+                if (raw.isNullOrBlank()) return emptyList()
+                return raw.split(";").mapNotNull { part ->
+                    val trimmed = part.trim()
+                    if (trimmed.isEmpty()) null else Cookie.parse(url, trimmed)
+                }
+            }
+        }
+
         val okHttpClient = OkHttpClient.Builder()
+            .cookieJar(webViewCookieJar)
             .followRedirects(true)
             .followSslRedirects(true)
-            .addInterceptor { chain ->
+            .addNetworkInterceptor { chain ->
                 val orig = chain.request()
-                val urlStr = orig.url.toString()
-                if (urlStr.contains("googleusercontent.com")) {
-                    val cookie = authRepository.getCookieString()
-                    val req = orig.newBuilder()
-                        .addHeader("Cookie", cookie)
-                        .addHeader("Origin", "https://gemini.google.com")
-                        .addHeader("Referer", "https://gemini.google.com/")
-                        .addHeader("User-Agent", GeminiWebClient.USER_AGENT)
-                        .build()
-                    chain.proceed(req)
+                val host = orig.url.host
+                if (host.contains("googleusercontent.com") || host.contains("google.com") || host.contains("ggpht.com")) {
+                    val cmCookie = CookieManager.getInstance().getCookie(orig.url.toString())
+                    val fallbackCookie = authRepository.getCookieString()
+                    val combinedCookie = listOfNotNull(cmCookie?.takeIf { it.isNotBlank() }, fallbackCookie.takeIf { it.isNotBlank() })
+                        .joinToString("; ")
+                    val reqBuilder = orig.newBuilder()
+                        .header("User-Agent", GeminiWebClient.USER_AGENT)
+                        .header("Referer", "https://gemini.google.com/")
+                        .header("Accept", "image/avif,image/webp,image/apng,image/*,*/*;q=0.8")
+                    if (orig.header("Cookie").isNullOrBlank() && combinedCookie.isNotBlank()) {
+                        reqBuilder.header("Cookie", combinedCookie)
+                    }
+                    chain.proceed(reqBuilder.build())
                 } else {
                     chain.proceed(orig)
                 }

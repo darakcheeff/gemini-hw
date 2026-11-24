@@ -278,6 +278,31 @@ fun MainScreen(
         }
     }
 
+    val screenshotPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        if (granted) {
+            pickLatestScreenshot()
+        } else {
+            Toast.makeText(context, "Нужно разрешение на доступ к фото для скриншотов", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    fun requestScreenshotWithPermission() {
+        val perm = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
+            android.Manifest.permission.READ_MEDIA_IMAGES
+        } else {
+            android.Manifest.permission.READ_EXTERNAL_STORAGE
+        }
+        val granted = androidx.core.content.ContextCompat.checkSelfPermission(context, perm) ==
+            android.content.pm.PackageManager.PERMISSION_GRANTED
+        if (granted) {
+            pickLatestScreenshot()
+        } else {
+            screenshotPermissionLauncher.launch(perm)
+        }
+    }
+
     LaunchedEffect(incomingIntent) {
         val actIntent = incomingIntent ?: return@LaunchedEffect
         val assistQuery = actIntent.getStringExtra(AssistantActivity.EXTRA_ASSISTANT_QUERY)
@@ -1053,7 +1078,7 @@ fun MainScreen(
                         leadingContent = { Icon(Icons.Default.Screenshot, contentDescription = null, tint = MaterialTheme.colorScheme.primary) },
                         modifier = Modifier.clickable {
                             showAttachmentMenu = false
-                            pickLatestScreenshot()
+                            requestScreenshotWithPermission()
                         }
                     )
                 }
