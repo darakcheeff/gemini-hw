@@ -75,9 +75,9 @@ open class AuthRepository(private val context: Context? = null) {
 
     open fun syncFromSystemCookieManager() {
         try {
+            if (context == null) return
             val cookieManager = CookieManager.getInstance()
             val googleCookies = cookieManager.getCookie("https://gemini.google.com")
-                ?: cookieManager.getCookie("https://google.com")
             if (!googleCookies.isNullOrBlank() && googleCookies.contains("__Secure-1PSID=")) {
                 saveSessionFromCookies(googleCookies)
             }

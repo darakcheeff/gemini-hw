@@ -99,11 +99,6 @@ class LoginActivity : ComponentActivity() {
 
         setupWebView()
 
-        // If WebView CookieManager already has a valid Google session, restore it immediately
-        if (checkSession("https://gemini.google.com/app")) {
-            return
-        }
-
         webView.loadUrl(LOGIN_URL)
     }
 
@@ -156,27 +151,16 @@ class LoginActivity : ComponentActivity() {
         }
 
         webView.webViewClient = object : WebViewClient() {
-            override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
-                super.onPageStarted(view, url, favicon)
-                checkSession(url)
-            }
-
             override fun onPageFinished(view: WebView?, url: String?) {
                 super.onPageFinished(view, url)
                 checkSession(url)
-            }
-
-            override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean {
-                val url = request?.url?.toString() ?: ""
-                checkSession(url)
-                return false
             }
         }
     }
 
     /**
      * Strictly verifies that user has completed Google authentication.
-     * Only succeeds when __Secure-1PSID cookie is present AND user is on gemini.google.com!
+     * Only succeeds when __Secure-1PSID cookie is present AND user has actually landed on gemini.google.com!
      */
     private fun checkSession(url: String?): Boolean {
         if (isFinishing) return true
@@ -184,10 +168,9 @@ class LoginActivity : ComponentActivity() {
         val cookies = cookieManager.getCookie("https://gemini.google.com") ?: ""
 
         val hasPsid = cookies.contains("__Secure-1PSID=")
-        val hasSid = cookies.contains("SID=") || cookies.contains("SAPISID=")
         val isOnGemini = url != null && url.contains("gemini.google.com") && !url.contains("accounts.google.com")
 
-        if (hasPsid && (hasSid || isOnGemini)) {
+        if (hasPsid && isOnGemini) {
             cookieManager.flush()
             authRepository.saveSessionFromCookies(cookies)
             Toast.makeText(this, "Вход успешно выполнен!", Toast.LENGTH_SHORT).show()

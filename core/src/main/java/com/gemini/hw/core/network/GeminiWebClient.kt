@@ -51,6 +51,7 @@ class GeminiWebClient(
      */
     suspend fun refreshTokensAndFetchModels(): Result<List<GeminiModel>> = withContext(Dispatchers.IO) {
         try {
+            authRepository.syncFromSystemCookieManager()
             val cookieStr = authRepository.getCookieString()
             if (cookieStr.isBlank() || !authRepository.hasValidSession()) {
                 return@withContext Result.failure(IllegalStateException("Требуется вход в аккаунт Google"))
@@ -67,7 +68,15 @@ class GeminiWebClient(
                     Log.e("GeminiWebClient", "Token fetch HTTP ${response.code}")
                     return@withContext Result.failure(Exception("HTTP error ${response.code} fetching tokens"))
                 }
+                val finalUrl = response.request.url.toString()
                 val html = response.body?.string() ?: ""
+                if (finalUrl.contains("accounts.google.com") || html.contains("boq_identityfrontendauthuiserver")) {
+                    Log.e("GeminiWebClient", "Redirected to accounts.google.com ($finalUrl), session cookies expired/incomplete")
+                    cachedSnlm0e = null
+                    cachedFdrFJe = null
+                    cachedBuildLabel = null
+                    return@withContext Result.failure(IllegalStateException("Требуется повторный вход в аккаунт Google"))
+                }
                 extractTokensFromHtml(html)
                 Log.w("GeminiWebClient", "Tokens extracted: snlm0eLen=${cachedSnlm0e?.length ?: 0}, fsid=${cachedFdrFJe}, bl=${cachedBuildLabel}")
             }
