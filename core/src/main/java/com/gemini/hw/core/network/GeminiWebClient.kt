@@ -484,6 +484,7 @@ class GeminiWebClient(
 
                                 var canvasDoc: CanvasDocument? = null
                                 val cand30 = firstCandidate?.optJSONArray(30)
+                                Log.w("GeminiWebClient", "stream cand len=${firstCandidate?.length()} c30=${cand30?.toString()?.take(300)} c30null=${firstCandidate?.isNull(30)}")
                                 if (cand30 != null && cand30.length() > 0) {
                                     val cItem = cand30.optJSONArray(0)
                                     if (cItem != null) {
@@ -938,6 +939,7 @@ class GeminiWebClient(
                                                         ?.ifBlank { null }
                                                         ?: firstCand.optJSONArray(37)?.optString(0, "")?.ifBlank { null }
                                                     val cand30 = firstCand.optJSONArray(30)
+                                                    Log.w("GeminiWebClient", "hist cand len=${firstCand.length()} c30=${cand30?.toString()?.take(300)}")
                                                     if (cand30 != null && cand30.length() > 0) {
                                                         val cItem = cand30.optJSONArray(0)
                                                         if (cItem != null) {
