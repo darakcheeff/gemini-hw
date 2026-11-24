@@ -15,6 +15,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.gemini.hw.core.model.GeminiModel
@@ -43,9 +44,12 @@ fun ModelSelectorDropdown(
             verticalAlignment = Alignment.CenterVertically
         ) {
             Text(
-                text = selectedModel?.displayName ?: "Gemini",
+                text = selectedModel?.shortName?.ifBlank { selectedModel.displayName } ?: "Gemini",
                 style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold),
-                color = MaterialTheme.colorScheme.onSurface
+                color = MaterialTheme.colorScheme.onSurface,
+                maxLines = 1,
+                softWrap = false,
+                overflow = TextOverflow.Ellipsis
             )
             Spacer(modifier = Modifier.width(4.dp))
             Icon(

@@ -350,11 +350,7 @@ class GeminiWebClient(
                 if (contextArr == null) {
                     put(JSONObject.NULL) // index 2
                 }
-                for (i in 3..6) {
-                    put(JSONObject.NULL)
-                }
-                put(targetId) // index 7: bot_id
-                for (i in 8..19) {
+                for (i in 3 until 20) {
                     put(JSONObject.NULL)
                 }
                 put(targetId) // index 20: projectId (Workspace notebook grounding)

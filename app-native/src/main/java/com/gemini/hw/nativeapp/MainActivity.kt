@@ -1591,9 +1591,12 @@ fun NotebookView(
                             modifier = Modifier.padding(horizontal = 8.dp)
                         ) {
                             Text(
-                                text = selectedModel?.displayName?.replace("Gemini ", "") ?: "Flash",
+                                text = selectedModel?.shortName?.ifBlank { selectedModel.displayName } ?: "Flash",
                                 style = MaterialTheme.typography.labelMedium,
-                                color = MaterialTheme.colorScheme.onSurface
+                                color = MaterialTheme.colorScheme.onSurface,
+                                maxLines = 1,
+                                softWrap = false,
+                                overflow = TextOverflow.Ellipsis
                             )
                             Icon(
                                 Icons.Default.ArrowDropDown,
