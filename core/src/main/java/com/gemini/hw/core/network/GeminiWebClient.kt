@@ -112,6 +112,11 @@ class GeminiWebClient(
         val cfbMatcher = PATTERN_CFB2H.matcher(html)
         if (cfbMatcher.find()) {
             cachedBuildLabel = cfbMatcher.group(1)
+        } else {
+            val boqMatcher = PATTERN_BOQ_BL.matcher(html)
+            if (boqMatcher.find()) {
+                cachedBuildLabel = boqMatcher.group(1)
+            }
         }
 
         val pushMatcher = PATTERN_PUSH_ID.matcher(html)
@@ -355,14 +360,14 @@ class GeminiWebClient(
         client.newCall(request).execute().use { response ->
             Log.w("GeminiWebClient", "StreamGenerate response code: ${response.code}, snlm0eLen=${snlm0e.length}, fsid=$fsid")
             if (!response.isSuccessful) {
-                val errBody = response.body?.string()?.take(200) ?: ""
+                val errBody = response.body?.string()?.replace("\n", " ")?.take(120) ?: ""
                 Log.e("GeminiWebClient", "StreamGenerate HTTP ${response.code}: $errBody")
                 emit(
                     ChatMessage(
                         id = messageId,
                         conversationId = currentConvoId,
                         role = MessageRole.MODEL,
-                        text = "Ошибка связи с сервером (${response.code}). [at=${snlm0e.length}, fsid=${fsid.isNotBlank()}] Проверьте подключение или выполните повторный вход."
+                        text = "Ошибка связи с сервером (${response.code}). [at=${snlm0e.length}, fsid=${fsid.isNotBlank()}, bl=$bl, body=$errBody]"
                     )
                 )
                 return@flow
@@ -1725,6 +1730,7 @@ class GeminiWebClient(
         private val PATTERN_AFW_TOKEN = Pattern.compile("\"(AFWLbD[^\"]+)\"")
         private val PATTERN_FDRFJE = Pattern.compile("\"FdrFJe\":\"([^\"]+)\"")
         private val PATTERN_CFB2H = Pattern.compile("\"cfb2h\":\"([^\"]+)\"")
+        private val PATTERN_BOQ_BL = Pattern.compile("\"(boq_gemini-web-uiserver_[0-9._p]+)\"")
         private val PATTERN_PUSH_ID = Pattern.compile("\"qKIAYe\":\"([^\"]+)\"")
         private val PATTERN_PCTX = Pattern.compile("\"Ylro7b\":\"([^\"]+)\"")
     }
