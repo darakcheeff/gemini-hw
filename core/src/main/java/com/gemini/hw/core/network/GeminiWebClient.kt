@@ -64,10 +64,12 @@ class GeminiWebClient(
 
             client.newCall(requestBuilder.build()).execute().use { response ->
                 if (!response.isSuccessful) {
+                    Log.e("GeminiWebClient", "Token fetch HTTP ${response.code}")
                     return@withContext Result.failure(Exception("HTTP error ${response.code} fetching tokens"))
                 }
                 val html = response.body?.string() ?: ""
                 extractTokensFromHtml(html)
+                Log.w("GeminiWebClient", "Tokens extracted: snlm0eLen=${cachedSnlm0e?.length ?: 0}, fsid=${cachedFdrFJe}, bl=${cachedBuildLabel}")
             }
 
             // 1. Fetch live models directly from Google otAQ7b RPC
@@ -89,10 +91,16 @@ class GeminiWebClient(
             cachedSnlm0e = snlmMatcher.group(1)
             cachedSnlm0e?.let { authRepository.saveSnlm0eToken(it) }
         } else {
-            val afwMatcher = PATTERN_AFW_TOKEN.matcher(html)
-            if (afwMatcher.find()) {
-                cachedSnlm0e = afwMatcher.group(1)
+            val thykhdMatcher = PATTERN_THYKHD.matcher(html)
+            if (thykhdMatcher.find()) {
+                cachedSnlm0e = thykhdMatcher.group(1)
                 cachedSnlm0e?.let { authRepository.saveSnlm0eToken(it) }
+            } else {
+                val afwMatcher = PATTERN_AFW_TOKEN.matcher(html)
+                if (afwMatcher.find()) {
+                    cachedSnlm0e = afwMatcher.group(1)
+                    cachedSnlm0e?.let { authRepository.saveSnlm0eToken(it) }
+                }
             }
         }
 
@@ -290,9 +298,14 @@ class GeminiWebClient(
         val msgStruct = JSONArray().apply {
             put(promptArr)
             put(JSONArray().put("ru"))
-            put(contextArr ?: JSONObject.NULL) // index 2: always fixed slot
+            if (contextArr != null) {
+                put(contextArr) // index 2
+            }
             if (!notebookId.isNullOrBlank()) {
                 val targetId = if (notebookId.startsWith("notebooks/")) notebookId else "notebooks/$notebookId"
+                if (contextArr == null) {
+                    put(JSONObject.NULL) // index 2
+                }
                 for (i in 3..6) {
                     put(JSONObject.NULL)
                 }
@@ -340,14 +353,16 @@ class GeminiWebClient(
         val messageId = "m_" + System.currentTimeMillis()
 
         client.newCall(request).execute().use { response ->
-            Log.d("GeminiWebClient", "StreamGenerate response code: ${response.code}")
+            Log.w("GeminiWebClient", "StreamGenerate response code: ${response.code}, snlm0eLen=${snlm0e.length}, fsid=$fsid")
             if (!response.isSuccessful) {
+                val errBody = response.body?.string()?.take(200) ?: ""
+                Log.e("GeminiWebClient", "StreamGenerate HTTP ${response.code}: $errBody")
                 emit(
                     ChatMessage(
                         id = messageId,
                         conversationId = currentConvoId,
                         role = MessageRole.MODEL,
-                        text = "Ошибка связи с сервером (${response.code}). Проверьте подключение или выполните повторный вход."
+                        text = "Ошибка связи с сервером (${response.code}). [at=${snlm0e.length}, fsid=${fsid.isNotBlank()}] Проверьте подключение или выполните повторный вход."
                     )
                 )
                 return@flow
@@ -535,7 +550,10 @@ class GeminiWebClient(
             .build()
 
         client.newCall(request).execute().use { response ->
-            if (!response.isSuccessful) return Pair(emptyList(), null)
+            if (!response.isSuccessful) {
+                Log.e("GeminiWebClient", "fetchMaZiqcPage HTTP ${response.code}")
+                return Pair(emptyList(), null)
+            }
             val body = response.body?.string() ?: ""
             return parseConversationsWithToken(body)
         }
@@ -1703,6 +1721,7 @@ class GeminiWebClient(
         }
 
         private val PATTERN_SNLM0E = Pattern.compile("\"SNlM0e\":\"([^\"]+)\"")
+        private val PATTERN_THYKHD = Pattern.compile("\"thykhd\":\"([^\"]+)\"")
         private val PATTERN_AFW_TOKEN = Pattern.compile("\"(AFWLbD[^\"]+)\"")
         private val PATTERN_FDRFJE = Pattern.compile("\"FdrFJe\":\"([^\"]+)\"")
         private val PATTERN_CFB2H = Pattern.compile("\"cfb2h\":\"([^\"]+)\"")

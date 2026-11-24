@@ -1449,23 +1449,9 @@ fun NotebookView(
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     IconButton(
                         onClick = onRefresh,
-                        modifier = Modifier.size(36.dp)
+                        modifier = Modifier.size(34.dp)
                     ) {
-                        Icon(Icons.Default.Refresh, contentDescription = "Обновить блокнот", tint = MaterialTheme.colorScheme.onSurfaceVariant)
-                    }
-
-                    IconButton(
-                        onClick = { showRenameDialog = true },
-                        modifier = Modifier.size(36.dp)
-                    ) {
-                        Icon(Icons.Default.Edit, contentDescription = "Переименовать блокнот", tint = MaterialTheme.colorScheme.onSurfaceVariant)
-                    }
-
-                    IconButton(
-                        onClick = { showDeleteDialog = true },
-                        modifier = Modifier.size(36.dp)
-                    ) {
-                        Icon(Icons.Default.Delete, contentDescription = "Удалить блокнот", tint = MaterialTheme.colorScheme.error)
+                        Icon(Icons.Default.Refresh, contentDescription = "Обновить блокнот", tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(20.dp))
                     }
 
                     Spacer(modifier = Modifier.width(4.dp))
@@ -1474,7 +1460,7 @@ fun NotebookView(
                         onClick = onAddSourcesClick,
                         shape = RoundedCornerShape(20.dp),
                         color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.7f),
-                        modifier = Modifier.height(38.dp)
+                        modifier = Modifier.height(36.dp)
                     ) {
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
