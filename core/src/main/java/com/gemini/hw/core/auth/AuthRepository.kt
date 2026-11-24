@@ -25,6 +25,9 @@ open class AuthRepository(private val context: Context? = null) {
 
     init {
         try {
+            if (!hasValidSession() && context != null) {
+                syncFromSystemCookieManager()
+            }
             _isLoggedIn.value = hasValidSession()
             _userEmail.value = prefs?.getString(KEY_USER_EMAIL, null)
         } catch (_: Exception) {}
@@ -61,8 +64,8 @@ open class AuthRepository(private val context: Context? = null) {
             _userEmail.value = email
         }
 
-        editor.apply()
-        _isLoggedIn.value = true
+        editor.commit()
+        _isLoggedIn.value = hasValidSession()
     }
 
     open fun saveSnlm0eToken(token: String) {
@@ -74,7 +77,8 @@ open class AuthRepository(private val context: Context? = null) {
         try {
             val cookieManager = CookieManager.getInstance()
             val googleCookies = cookieManager.getCookie("https://gemini.google.com")
-            if (!googleCookies.isNullOrBlank()) {
+                ?: cookieManager.getCookie("https://google.com")
+            if (!googleCookies.isNullOrBlank() && googleCookies.contains("__Secure-1PSID=")) {
                 saveSessionFromCookies(googleCookies)
             }
         } catch (_: Exception) {}

@@ -69,8 +69,15 @@ class LoginActivity : ComponentActivity() {
             setTextColor(0xFF4E88F5.toInt())
             setPadding(16, 8, 16, 8)
             setOnClickListener {
-                val intent = Intent(Intent.ACTION_VIEW, Uri.parse(LOGIN_URL))
-                startActivity(intent)
+                try {
+                    val intent = Intent(Intent.ACTION_VIEW, Uri.parse("https://gemini.google.com/app")).apply {
+                        addCategory(Intent.CATEGORY_BROWSABLE)
+                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    }
+                    startActivity(Intent.createChooser(intent, "Открыть в браузере"))
+                } catch (e: Exception) {
+                    Toast.makeText(this@LoginActivity, "Не удалось открыть браузер: ${e.message}", Toast.LENGTH_LONG).show()
+                }
             }
         }
 
@@ -110,6 +117,11 @@ class LoginActivity : ComponentActivity() {
         setContentView(root)
 
         setupWebView()
+
+        // If WebView CookieManager already has a valid Google session, restore it immediately
+        if (checkSession("https://gemini.google.com/app")) {
+            return
+        }
 
         webView.loadUrl(LOGIN_URL)
     }
@@ -185,7 +197,8 @@ class LoginActivity : ComponentActivity() {
      * Strictly verifies that user has completed Google authentication.
      * Only succeeds when __Secure-1PSID cookie is present AND user is on gemini.google.com!
      */
-    private fun checkSession(url: String?) {
+    private fun checkSession(url: String?): Boolean {
+        if (isFinishing) return true
         val cookieManager = CookieManager.getInstance()
         val cookies = cookieManager.getCookie("https://gemini.google.com") ?: ""
 
@@ -194,11 +207,14 @@ class LoginActivity : ComponentActivity() {
         val isOnGemini = url != null && url.contains("gemini.google.com") && !url.contains("accounts.google.com")
 
         if (hasPsid && (hasSid || isOnGemini)) {
+            cookieManager.flush()
             authRepository.saveSessionFromCookies(cookies)
             Toast.makeText(this, "Вход успешно выполнен!", Toast.LENGTH_SHORT).show()
             setResult(Activity.RESULT_OK)
             finish()
+            return true
         }
+        return false
     }
 
     private fun showManualCookieDialog() {
