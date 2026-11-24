@@ -63,28 +63,9 @@ class LoginActivity : ComponentActivity() {
             setOnClickListener { showManualCookieDialog() }
         }
 
-        val browserBtn = TextView(this).apply {
-            text = "Браузер"
-            textSize = 14f
-            setTextColor(0xFF4E88F5.toInt())
-            setPadding(16, 8, 16, 8)
-            setOnClickListener {
-                try {
-                    val intent = Intent(Intent.ACTION_VIEW, Uri.parse(LOGIN_URL)).apply {
-                        addCategory(Intent.CATEGORY_BROWSABLE)
-                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                    }
-                    startActivity(Intent.createChooser(intent, "Открыть в браузере"))
-                } catch (e: Exception) {
-                    Toast.makeText(this@LoginActivity, "Не удалось открыть браузер: ${e.message}", Toast.LENGTH_LONG).show()
-                }
-            }
-        }
-
         topBar.addView(closeBtn)
         topBar.addView(title)
         topBar.addView(cookieBtn)
-        topBar.addView(browserBtn)
         root.addView(topBar)
 
         progressBar = ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal).apply {
