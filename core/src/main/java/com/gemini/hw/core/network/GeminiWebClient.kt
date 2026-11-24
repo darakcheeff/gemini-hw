@@ -671,21 +671,21 @@ class GeminiWebClient(
     suspend fun renameNotebook(notebookId: String, newTitle: String): Result<Boolean> = withContext(Dispatchers.IO) {
         try {
             val targetId = if (notebookId.startsWith("notebooks/")) notebookId else "notebooks/$notebookId"
+            // kHv0Vd (UpdateBot): [id, botProto]; botProto mirrors the oMH3Zd create payload
             val botProto = JSONArray().apply {
-                put(targetId)
                 put(newTitle)
                 put("")
-                put("")
-                for (i in 4..8) put(JSONObject.NULL)
-                put(0)
-                put(JSONObject.NULL)
-                put(1)
-                put(JSONObject.NULL)
-                put(JSONObject.NULL)
-                put(JSONObject.NULL)
-                put(JSONArray())
+                for (i in 2..15) put(JSONObject.NULL)
+                put(JSONArray().apply {
+                    put(2)
+                    put(JSONObject.NULL)
+                    put(JSONObject.NULL)
+                    put(JSONObject.NULL)
+                    put(1)
+                })
             }
             val updateReq = JSONArray().apply {
+                put(targetId)
                 put(botProto)
             }
             val res = callBatchexecuteRPC("kHv0Vd", updateReq.toString())
