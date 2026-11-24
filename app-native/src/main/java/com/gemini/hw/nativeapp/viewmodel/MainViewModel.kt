@@ -9,6 +9,8 @@ import com.gemini.hw.core.model.*
 import com.gemini.hw.core.network.GeminiWebClient
 import com.gemini.hw.core.repository.GemsAndSparkRepository
 import com.gemini.hw.nativeapp.GeminiApp
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -475,13 +477,25 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         dispatchToGemini(fullPromptForServer, emptyList(), null)
     }
 
+    private var generationJob: Job? = null
+
+    fun stopGeneration() {
+        generationJob?.cancel()
+        generationJob = null
+        _isLoading.value = false
+        _messages.value = _messages.value.map { msg ->
+            if (msg.isStreaming) msg.copy(isStreaming = false) else msg
+        }
+    }
+
     private fun dispatchToGemini(
         prompt: String,
         attachments: List<Attachment> = emptyList(),
         targetNotebookId: String? = null,
         parentMessageId: String? = null
     ) {
-        viewModelScope.launch {
+        generationJob?.cancel()
+        generationJob = viewModelScope.launch {
             _isLoading.value = true
             val convoId = _currentConversationId.value
             val currentModel = _selectedModel.value
@@ -632,6 +646,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     }
                 }
             } catch (e: Exception) {
+                if (e is CancellationException) throw e
                 _messages.value = _messages.value + ChatMessage(
                     id = "err_" + System.currentTimeMillis(),
                     conversationId = _currentConversationId.value ?: "new",

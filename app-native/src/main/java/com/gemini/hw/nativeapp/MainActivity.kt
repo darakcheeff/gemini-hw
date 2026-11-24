@@ -996,9 +996,12 @@ fun MainScreen(
 
                             Spacer(modifier = Modifier.width(6.dp))
 
+                            val canSend = inputText.isNotBlank() || pendingAttachments.isNotEmpty()
                             IconButton(
                                 onClick = {
-                                    if (inputText.isNotBlank() || pendingAttachments.isNotEmpty()) {
+                                    if (isLoading) {
+                                        viewModel.stopGeneration()
+                                    } else if (canSend) {
                                         val textToSend = inputText
                                         val attsToSend = pendingAttachments
                                         inputText = ""
@@ -1006,19 +1009,19 @@ fun MainScreen(
                                         viewModel.sendMessage(textToSend, attsToSend)
                                     }
                                 },
-                                enabled = (inputText.isNotBlank() || pendingAttachments.isNotEmpty()) && !isLoading,
+                                enabled = isLoading || canSend,
                                 modifier = Modifier
                                     .size(42.dp)
                                     .clip(CircleShape)
                                     .background(
-                                        if ((inputText.isNotBlank() || pendingAttachments.isNotEmpty()) && !isLoading) MaterialTheme.colorScheme.primary
+                                        if (isLoading || canSend) MaterialTheme.colorScheme.primary
                                         else MaterialTheme.colorScheme.surfaceVariant
                                     )
                             ) {
                                 Icon(
-                                    Icons.AutoMirrored.Filled.Send,
-                                    contentDescription = "Отправить",
-                                    tint = if ((inputText.isNotBlank() || pendingAttachments.isNotEmpty()) && !isLoading) Color.White else MaterialTheme.colorScheme.onSurfaceVariant
+                                    imageVector = if (isLoading) Icons.Default.Stop else Icons.AutoMirrored.Filled.Send,
+                                    contentDescription = if (isLoading) "Остановить генерацию" else "Отправить",
+                                    tint = if (isLoading || canSend) Color.White else MaterialTheme.colorScheme.onSurfaceVariant
                                 )
                             }
                         }
